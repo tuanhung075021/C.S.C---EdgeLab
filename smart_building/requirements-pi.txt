@@ -1,0 +1,7 @@
+opencv-python-headless>=4.8.0
+openvino>=2023.1.0
+flask>=3.0.0
+numpy>=1.24.0
+rpi-lgpio>=0.6
+adafruit-circuitpython-dht>=4.0.0
+pytest>=7.4.0

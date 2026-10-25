@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>EcoZone AI — Camera Perspective Calibration</title>
+  <meta name="description" content="Interactive 4-point perspective calibration interface for EcoZone AI overhead camera.">
+
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <!-- Main Dashboard Stylesheet -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+  <style>
+    /* Dedicated Calibration Page Styles */
+    .calibrate-page {
+      max-width: 1360px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .calibrate-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1.2rem 2rem;
+      background: var(--bg-card, rgba(14, 20, 40, 0.68));
+      backdrop-filter: var(--blur, blur(14px));
+      -webkit-backdrop-filter: var(--blur, blur(14px));
+      border: 1px solid var(--border-glass, rgba(255,255,255,0.07));
+      border-radius: var(--radius-card, 18px);
+      box-shadow: var(--shadow-card, 0 8px 36px rgba(0,0,0,0.40));
+    }
+
+    .btn-nav-back {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.55rem 1.2rem;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border-glass, rgba(255,255,255,0.12));
+      border-radius: var(--radius-sm, 10px);
+      color: var(--text-main, #f1f5f9);
+      text-decoration: none;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: var(--transition, 200ms ease-in-out);
+    }
+    .btn-nav-back:hover {
+      background: rgba(255, 255, 255, 0.14);
+      border-color: rgba(255, 255, 255, 0.25);
+      transform: translateX(-2px);
+    }
+
+    .notification-banner {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 1.5rem;
+      border-radius: var(--radius-card, 18px);
+      font-size: 0.95rem;
+      font-weight: 500;
+      animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .notification-banner.success {
+      display: flex;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.45);
+      color: #34d399;
+    }
+    .notification-banner.error {
+      display: flex;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.45);
+      color: #f87171;
+    }
+    .notification-close {
+      background: none;
+      border: none;
+      color: inherit;
+      font-size: 1.2rem;
+      cursor: pointer;
+      padding: 0 0.5rem;
+      opacity: 0.75;
+      transition: opacity 0.2s;
+    }
+    .notification-close:hover { opacity: 1; }
+
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .calibrate-grid {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 1.5rem;
+      align-items: start;
+    }
+
+    @media (max-width: 1024px) {
+      .calibrate-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .workspace-section {
+      display: flex;
+      flex-direction: column;
+      gap: 1.2rem;
+    }
+
+    .instruction-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 1rem 1.4rem;
+      background: rgba(37, 99, 235, 0.08);
+      border: 1px solid rgba(37, 99, 235, 0.25);
+      border-radius: var(--radius-card, 18px);
+      font-size: 0.88rem;
+      line-height: 1.5;
+      color: #bfdbfe;
+    }
+    .instruction-icon { font-size: 1.5rem; flex-shrink: 0; }
+    .instruction-text strong { color: #ffffff; }
+
+    .canvas-card {
+      background: var(--bg-card, rgba(14, 20, 40, 0.68));
+      backdrop-filter: var(--blur, blur(14px));
+      -webkit-backdrop-filter: var(--blur, blur(14px));
+      border: 1px solid var(--border-glass, rgba(255,255,255,0.07));
+      border-radius: var(--radius-card, 18px);
+      padding: 1.4rem;
+      box-shadow: var(--shadow-card, 0 8px 36px rgba(0,0,0,0.40));
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .canvas-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    .step-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.35rem 0.9rem;
+      border-radius: 20px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      transition: all 0.25s ease;
+    }
+    .step-badge.step-active {
+      background: rgba(124, 58, 237, 0.18);
+      border: 1px solid rgba(167, 139, 250, 0.5);
+      color: #c4b5fd;
+    }
+    .step-badge.step-complete {
+      background: rgba(16, 185, 129, 0.18);
+      border: 1px solid rgba(16, 185, 129, 0.5);
+      color: #34d399;
+    }
+
+    .canvas-meta-group {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .meta-pill {
+      font-family: var(--text-mono, monospace);
+      font-size: 0.75rem;
+      padding: 0.25rem 0.6rem;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      color: var(--text-muted, #8b9ab4);
+    }
+
+    .canvas-wrapper {
+      position: relative;
+      width: 100%;
+      background: #03030a;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      touch-action: none;
+      cursor: crosshair;
+    }
+
+    #calibrationCanvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 68vh;
+      object-fit: contain;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .canvas-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(8, 8, 22, 0.88);
+      backdrop-filter: blur(8px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      z-index: 10;
+      transition: opacity 0.25s ease;
+    }
+    .canvas-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+      display: none;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(124, 58, 237, 0.2);
+      border-top-color: #a78bfa;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .overlay-msg {
+      font-size: 0.92rem;
+      color: var(--text-main, #f1f5f9);
+      font-weight: 500;
+    }
+
+    .canvas-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      padding-top: 0.5rem;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+
+    .btn-action {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.55rem 1rem;
+      font-size: 0.84rem;
+      font-weight: 600;
+      border-radius: var(--radius-sm, 10px);
+      cursor: pointer;
+      transition: var(--transition, 200ms ease-in-out);
+      border: 1px solid var(--border-glass, rgba(255,255,255,0.1));
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-main, #f1f5f9);
+      font-family: inherit;
+    }
+    .btn-action:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.14);
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+    .btn-action:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .keyboard-hint {
+      font-size: 0.76rem;
+      color: var(--text-muted, #8b9ab4);
+    }
+    kbd {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 4px;
+      padding: 0.1rem 0.35rem;
+      font-family: var(--text-mono, monospace);
+      font-size: 0.72rem;
+    }
+
+    .sidebar-section {
+      display: flex;
+      flex-direction: column;
+      gap: 1.2rem;
+    }
+
+    .sidebar-card {
+      background: var(--bg-card, rgba(14, 20, 40, 0.68));
+      backdrop-filter: var(--blur, blur(14px));
+      -webkit-backdrop-filter: var(--blur, blur(14px));
+      border: 1px solid var(--border-glass, rgba(255,255,255,0.07));
+      border-radius: var(--radius-card, 18px);
+      padding: 1.4rem;
+      box-shadow: var(--shadow-card, 0 8px 36px rgba(0,0,0,0.40));
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .card-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-main, #f1f5f9);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .points-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    .point-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.65rem 0.9rem;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      transition: all 0.2s ease;
+    }
+    .point-item.active {
+      background: rgba(124, 58, 237, 0.12);
+      border-color: rgba(167, 139, 250, 0.4);
+      transform: translateX(4px);
+    }
+    .point-item.completed {
+      background: rgba(16, 185, 129, 0.08);
+      border-color: rgba(16, 185, 129, 0.3);
+    }
+
+    .point-identity {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    .point-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #4b5563;
+      transition: all 0.2s ease;
+    }
+    .point-item.completed .point-dot {
+      background: #10b981;
+      box-shadow: 0 0 8px #10b981;
+    }
+    .point-item.active .point-dot {
+      background: #a78bfa;
+      box-shadow: 0 0 8px #a78bfa;
+      animation: sse-pulse 1.2s infinite;
+    }
+
+    .point-name {
+      font-size: 0.84rem;
+      font-weight: 500;
+      color: var(--text-main, #f1f5f9);
+    }
+    .point-target {
+      font-size: 0.72rem;
+      color: var(--text-muted, #8b9ab4);
+      font-family: var(--text-mono, monospace);
+    }
+
+    .point-coord {
+      font-family: var(--text-mono, monospace);
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #60a5fa;
+      background: rgba(0, 0, 0, 0.25);
+      padding: 0.2rem 0.5rem;
+      border-radius: 6px;
+    }
+    .point-coord.pending {
+      color: var(--text-muted, #64748b);
+      font-weight: 400;
+      font-style: italic;
+    }
+
+    .mapping-reference-box {
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px dashed rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      padding: 0.85rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      font-size: 0.78rem;
+      color: var(--text-muted, #94a3b8);
+      line-height: 1.45;
+    }
+    .mapping-reference-title {
+      font-weight: 600;
+      color: var(--text-accent, #a78bfa);
+      font-size: 0.8rem;
+    }
+    .mapping-badge-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.4rem;
+      margin-top: 0.2rem;
+    }
+    .map-badge {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 0.25rem 0.45rem;
+      border-radius: 6px;
+      font-family: var(--text-mono, monospace);
+      font-size: 0.72rem;
+    }
+
+    .btn-save-primary {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 0.6rem;
+      width: 100%;
+      padding: 0.9rem 1.5rem;
+      background: var(--accent-gradient, linear-gradient(135deg, #7c3aed 0%, #2563eb 100%));
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: var(--radius-sm, 10px);
+      color: #ffffff;
+      font-size: 0.96rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      box-shadow: 0 4px 18px rgba(124, 58, 237, 0.35);
+      font-family: inherit;
+    }
+    .btn-save-primary:hover:not(:disabled) {
+      box-shadow: 0 6px 26px rgba(124, 58, 237, 0.55);
+      transform: translateY(-2px);
+    }
+    .btn-save-primary:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="dashboard-container calibrate-page">
+
+    <!-- Top Navigation Header -->
+    <header class="calibrate-header">
+      <div class="logo-group">
+        <h1 class="logo-text"><span class="logo-gradient">EcoZone</span> AI</h1>
+        <span class="subtitle-badge">Camera Calibration (3×2 Model)</span>
+      </div>
+      <a href="/" class="btn-nav-back">
+        <span>←</span> Back to Dashboard
+      </a>
+    </header>
+
+    <!-- Global Notification Banner / Toast -->
+    <div id="notification-banner" class="notification-banner">
+      <span id="notification-text"></span>
+      <button class="notification-close" onclick="closeNotification()">×</button>
+    </div>
+
+    <!-- Main Content Grid -->
+    <div class="calibrate-grid">
+
+      <!-- Left Column: Workspace & Canvas -->
+      <section class="workspace-section">
+
+        <!-- Instruction Alert -->
+        <div class="instruction-card">
+          <div class="instruction-icon">🎯</div>
+          <div class="instruction-text">
+            <strong>Room Floor Perspective Setup (30×40cm Model)</strong><br>
+            Click exactly <strong>4 corner points</strong> in clockwise order on the camera snapshot:
+            <strong>1: Top-Left (TL)</strong> → <strong>2: Top-Right (TR)</strong> → <strong>3: Bottom-Right (BR)</strong> → <strong>4: Bottom-Left (BL)</strong>.
+          </div>
+        </div>
+
+        <!-- Canvas Container Card -->
+        <div class="canvas-card">
+          <div class="canvas-header">
+            <div id="step-badge" class="step-badge step-active">
+              <span id="step-dot" class="pulse-dot"></span>
+              <span id="step-text">Step 1/4: Click Top-Left (TL)</span>
+            </div>
+            <div class="canvas-meta-group">
+              <span id="resolution-pill" class="meta-pill">Res: 640×480</span>
+              <span id="time-pill" class="meta-pill">Snapshot: Ready</span>
+            </div>
+          </div>
+
+          <!-- Interactive HTML5 Canvas Workspace -->
+          <div class="canvas-wrapper" id="canvas-wrapper">
+            <canvas id="calibrationCanvas" width="640" height="480"></canvas>
+
+            <!-- Loading Spinner Overlay -->
+            <div id="canvas-loading" class="canvas-overlay">
+              <div class="spinner"></div>
+              <div class="overlay-msg" id="loading-msg">Fetching live snapshot from camera...</div>
+            </div>
+
+            <!-- Error State Overlay -->
+            <div id="canvas-error" class="canvas-overlay hidden">
+              <div style="font-size: 2rem;">⚠️</div>
+              <div class="overlay-msg" id="error-overlay-msg">Failed to load camera frame.</div>
+              <button class="btn-action" onclick="loadSnapshot()">🔄 Retry Snapshot</button>
+            </div>
+          </div>
+
+          <!-- Canvas Quick Toolbar -->
+          <div class="canvas-toolbar">
+            <div class="btn-group">
+              <button id="btn-refresh" class="btn-action" onclick="loadSnapshot()">
+                📷 Take New Snapshot
+              </button>
+              <button id="btn-undo" class="btn-action" onclick="undoPoint()" disabled>
+                ↩️ Undo Point
+              </button>
+              <button id="btn-reset" class="btn-action" onclick="resetPoints()">
+                🔄 Reset Points
+              </button>
+            </div>
+            <span class="keyboard-hint">
+              Shortcuts: <kbd>R</kbd> Reset &nbsp; <kbd>U</kbd> Undo &nbsp; <kbd>S</kbd> Save
+            </span>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- Right Column: Step Checklist, Reference & Save Actions -->
+      <aside class="sidebar-section">
+
+        <!-- Calibration Checklist Card -->
+        <div class="sidebar-card">
+          <h2 class="card-title">
+            <span>📍</span> Selected Corner Points
+          </h2>
+
+          <div class="points-list">
+            <!-- Point 1: TL -->
+            <div id="item-0" class="point-item active">
+              <div class="point-identity">
+                <span class="point-dot"></span>
+                <div>
+                  <div class="point-name">1: Top-Left (TL)</div>
+                  <div class="point-target">Target: (0, 0)</div>
+                </div>
+              </div>
+              <span id="coord-0" class="point-coord pending">Pending</span>
+            </div>
+
+            <!-- Point 2: TR -->
+            <div id="item-1" class="point-item">
+              <div class="point-identity">
+                <span class="point-dot"></span>
+                <div>
+                  <div class="point-name">2: Top-Right (TR)</div>
+                  <div class="point-target">Target: (600, 0)</div>
+                </div>
+              </div>
+              <span id="coord-1" class="point-coord pending">Pending</span>
+            </div>
+
+            <!-- Point 3: BR -->
+            <div id="item-2" class="point-item">
+              <div class="point-identity">
+                <span class="point-dot"></span>
+                <div>
+                  <div class="point-name">3: Bottom-Right (BR)</div>
+                  <div class="point-target">Target: (600, 400)</div>
+                </div>
+              </div>
+              <span id="coord-2" class="point-coord pending">Pending</span>
+            </div>
+
+            <!-- Point 4: BL -->
+            <div id="item-3" class="point-item">
+              <div class="point-identity">
+                <span class="point-dot"></span>
+                <div>
+                  <div class="point-name">4: Bottom-Left (BL)</div>
+                  <div class="point-target">Target: (0, 400)</div>
+                </div>
+              </div>
+              <span id="coord-3" class="point-coord pending">Pending</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Destination Reference Guide -->
+        <div class="sidebar-card">
+          <h2 class="card-title">
+            <span>📐</span> Physical Layout Reference
+          </h2>
+
+          <div class="mapping-reference-box">
+            <div class="mapping-reference-title">30cm × 40cm Floor Model (3×2 Grid)</div>
+            <div>Warped Bird's-Eye Canvas is 600×400 px. Homography matrix maps your 4 corner picks to top-down grid coordinates:</div>
+            <div class="mapping-badge-row">
+              <div class="map-badge">TL: (0, 0) px</div>
+              <div class="map-badge">TR: (600, 0) px</div>
+              <div class="map-badge">BL: (0, 400) px</div>
+              <div class="map-badge">BR: (600, 400) px</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Card -->
+        <div class="sidebar-card">
+          <button id="btn-save" class="btn-save-primary" onclick="saveCalibration()" disabled>
+            💾 Save Calibration
+          </button>
+          <div style="font-size: 0.78rem; color: var(--text-muted, #8b9ab4); text-align: center; line-height: 1.4;">
+            Saves homography to <code>perspective_matrix.npy</code>.<br>
+            Restart <code>app.py</code> to apply to live vision pipeline.
+          </div>
+        </div>
+
+      </aside>
+
+    </div><!-- /.calibrate-grid -->
+
+  </div><!-- /.dashboard-container -->
+
+  <script>
+    /**
+     * EcoZone AI — Interactive HTML5 Canvas Calibration Controller
+     */
+    (function () {
+      // --- Constants & Config ---
+      const POINT_DEFINITIONS = [
+        { label: 'TL', name: 'Top-Left', color: '#10b981', target: '(0, 0)' },
+        { label: 'TR', name: 'Top-Right', color: '#3b82f6', target: '(600, 0)' },
+        { label: 'BR', name: 'Bottom-Right', color: '#8b5cf6', target: '(600, 400)' },
+        { label: 'BL', name: 'Bottom-Left', color: '#f59e0b', target: '(0, 400)' }
+      ];
+
+      // --- DOM Elements ---
+      const canvas = document.getElementById('calibrationCanvas');
+      const ctx = canvas.getContext('2d');
+      const loadingOverlay = document.getElementById('canvas-loading');
+      const errorOverlay = document.getElementById('canvas-error');
+      const errorOverlayMsg = document.getElementById('error-overlay-msg');
+      const stepBadge = document.getElementById('step-badge');
+      const stepText = document.getElementById('step-text');
+      const resolutionPill = document.getElementById('resolution-pill');
+      const timePill = document.getElementById('time-pill');
+      const btnSave = document.getElementById('btn-save');
+      const btnUndo = document.getElementById('btn-undo');
+      const banner = document.getElementById('notification-banner');
+      const bannerText = document.getElementById('notification-text');
+
+      // --- Application State ---
+      let rawImage = null;
+      let points = []; // Array of { x, y, label, name, color }
+      let isSaving = false;
+
+      // --- Coordinate Extraction & Display Scaling ---
+      function getCanvasCoordinates(event) {
+        const rect = canvas.getBoundingClientRect();
+        let clientX = 0;
+        let clientY = 0;
+
+        if (event.touches && event.touches.length > 0) {
+          clientX = event.touches[0].clientX;
+          clientY = event.touches[0].clientY;
+        } else if (event.changedTouches && event.changedTouches.length > 0) {
+          clientX = event.changedTouches[0].clientX;
+          clientY = event.changedTouches[0].clientY;
+        } else {
+          clientX = event.clientX;
+          clientY = event.clientY;
+        }
+
+        // CSS offsets
+        const cssX = clientX - rect.left;
+        const cssY = clientY - rect.top;
+
+        // Scaling factors between CSS display size and internal canvas resolution
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+
+        let x = Math.round(cssX * scaleX);
+        let y = Math.round(cssY * scaleY);
+
+        // Clamp to image dimensions
+        x = Math.max(0, Math.min(canvas.width - 1, x));
+        y = Math.max(0, Math.min(canvas.height - 1, y));
+
+        return { x, y };
+      }
+
+      // --- Canvas Drawing Engine ---
+      function renderCanvas() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 1. Draw snapshot image background
+        if (rawImage && rawImage.complete && rawImage.naturalWidth > 0) {
+          ctx.drawImage(rawImage, 0, 0, canvas.width, canvas.height);
+        } else {
+          // Dark fallback placeholder
+          ctx.fillStyle = '#080816';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // 2. Draw connecting polygon / lines overlay
+        if (points.length >= 2) {
+          ctx.beginPath();
+          ctx.moveTo(points[0].x, points[0].y);
+          for (let i = 1; i < points.length; i++) {
+            ctx.lineTo(points[i].x, points[i].y);
+          }
+
+          if (points.length === 4) {
+            ctx.closePath();
+            // Semi-transparent polygon surface fill
+            ctx.fillStyle = 'rgba(16, 185, 129, 0.20)';
+            ctx.fill();
+            // Solid boundary line
+            ctx.strokeStyle = '#10b981';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([]);
+            ctx.stroke();
+          } else {
+            // Dashed line for in-progress polygon
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 2.5;
+            ctx.setLineDash([8, 5]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        }
+
+        // 3. Draw Point Markers & Labeled Badges
+        points.forEach((pt, index) => {
+          const { x, y, color, label } = pt;
+
+          // Outer glowing halo
+          ctx.beginPath();
+          ctx.arc(x, y, 14, 0, Math.PI * 2);
+          ctx.fillStyle = color + '44';
+          ctx.fill();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          // Inner solid circle
+          ctx.beginPath();
+          ctx.arc(x, y, 6, 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.fill();
+
+          // White center dot
+          ctx.beginPath();
+          ctx.arc(x, y, 2, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+
+          // Text Callout Pill Badge
+          const badgeText = `${index + 1}: ${label} (${x}, ${y})`;
+          ctx.font = '600 12px "JetBrains Mono", monospace';
+          const textMetrics = ctx.measureText(badgeText);
+          const badgeWidth = textMetrics.width + 16;
+          const badgeHeight = 22;
+
+          let badgeX = x + 12;
+          let badgeY = y - 12 - badgeHeight;
+
+          // Keep badge within canvas bounds
+          if (badgeX + badgeWidth > canvas.width - 6) {
+            badgeX = x - badgeWidth - 12;
+          }
+          if (badgeY < 6) {
+            badgeY = y + 16;
+          }
+
+          // Badge Background Box
+          ctx.fillStyle = 'rgba(8, 8, 22, 0.92)';
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          roundRect(ctx, badgeX, badgeY, badgeWidth, badgeHeight, 6, true, true);
+
+          // Badge Text
+          ctx.fillStyle = '#f1f5f9';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(badgeText, badgeX + 8, badgeY + badgeHeight / 2);
+        });
+      }
+
+      // Helper to draw rounded rectangle on canvas
+      function roundRect(context, x, y, width, height, radius, fill, stroke) {
+        context.beginPath();
+        context.moveTo(x + radius, y);
+        context.lineTo(x + width - radius, y);
+        context.quadraticCurveTo(x + width, y, x + width, y + radius);
+        context.lineTo(x + width, y + height - radius);
+        context.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+        context.lineTo(x + radius, y + height);
+        context.quadraticCurveTo(x, y + height, x, y + height - radius);
+        context.lineTo(x, y + radius);
+        context.quadraticCurveTo(x, y, x + radius, y);
+        context.closePath();
+        if (fill) context.fill();
+        if (stroke) context.stroke();
+      }
+
+      // --- UI State Sync ---
+      function syncUI() {
+        const count = points.length;
+
+        // 1. Update Step Badge & Header Status
+        if (count < 4) {
+          const nextDef = POINT_DEFINITIONS[count];
+          stepBadge.className = 'step-badge step-active';
+          stepText.textContent = `Step ${count + 1}/4: Click ${nextDef.name} (${nextDef.label})`;
+        } else {
+          stepBadge.className = 'step-badge step-complete';
+          stepText.textContent = `✅ 4/4 Corners Selected! Ready to Save`;
+        }
+
+        // 2. Update Checklist Items & Coordinates
+        for (let i = 0; i < 4; i++) {
+          const itemEl = document.getElementById(`item-${i}`);
+          const coordEl = document.getElementById(`coord-${i}`);
+
+          if (i < count) {
+            itemEl.className = 'point-item completed';
+            coordEl.className = 'point-coord';
+            coordEl.textContent = `(${points[i].x}, ${points[i].y})`;
+          } else if (i === count) {
+            itemEl.className = 'point-item active';
+            coordEl.className = 'point-coord pending';
+            coordEl.textContent = 'Click to place';
+          } else {
+            itemEl.className = 'point-item';
+            coordEl.className = 'point-coord pending';
+            coordEl.textContent = 'Pending';
+          }
+        }
+
+        // 3. Update Buttons
+        btnSave.disabled = (count !== 4) || isSaving;
+        btnUndo.disabled = (count === 0);
+
+        // 4. Re-draw Canvas
+        renderCanvas();
+      }
+
+      // --- Pointer / Touch Event Handlers ---
+      function handleCanvasInteraction(e) {
+        e.preventDefault();
+        if (points.length >= 4) {
+          showNotification('All 4 corners are placed. Click "Save Calibration" or "Reset" to change.', 'error');
+          return;
+        }
+
+        const coords = getCanvasCoordinates(e);
+        const nextDef = POINT_DEFINITIONS[points.length];
+
+        points.push({
+          x: coords.x,
+          y: coords.y,
+          label: nextDef.label,
+          name: nextDef.name,
+          color: nextDef.color
+        });
+
+        syncUI();
+      }
+
+      // --- Snapshot Ingestion ---
+      function loadSnapshot() {
+        loadingOverlay.classList.remove('hidden');
+        errorOverlay.classList.add('hidden');
+        timePill.textContent = 'Fetching...';
+
+        const img = new Image();
+        // Cache-busting timestamp
+        img.src = '/calibrate/snapshot?t=' + Date.now();
+
+        img.onload = function () {
+          rawImage = img;
+          canvas.width = img.naturalWidth || 640;
+          canvas.height = img.naturalHeight || 480;
+
+          resolutionPill.textContent = `Res: ${canvas.width}×${canvas.height}`;
+          timePill.textContent = `Snapshot: ${new Date().toLocaleTimeString()}`;
+
+          loadingOverlay.classList.add('hidden');
+          syncUI();
+        };
+
+        img.onerror = function () {
+          loadingOverlay.classList.add('hidden');
+          errorOverlay.classList.remove('hidden');
+          errorOverlayMsg.textContent = 'Could not retrieve frame from /calibrate/snapshot.';
+          timePill.textContent = 'Error';
+          showNotification('Failed to fetch snapshot from camera stream. Please ensure app.py is running.', 'error');
+        };
+      }
+
+      // --- Actions: Reset, Undo, Save ---
+      function resetPoints() {
+        points = [];
+        closeNotification();
+        syncUI();
+      }
+
+      function undoPoint() {
+        if (points.length > 0) {
+          points.pop();
+          closeNotification();
+          syncUI();
+        }
+      }
+
+      async function saveCalibration() {
+        if (points.length !== 4) {
+          showNotification('Please place all 4 corner points before saving.', 'error');
+          return;
+        }
+
+        isSaving = true;
+        btnSave.disabled = true;
+        btnSave.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px;display:inline-block;margin-right:8px;"></span> Saving...';
+
+        const payload = {
+          points: points.map(p => [p.x, p.y]),
+          img_width: canvas.width,
+          img_height: canvas.height
+        };
+
+        try {
+          const response = await fetch('/calibrate/save', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+
+          const data = await response.json();
+
+          if (response.ok && data.status === 'ok') {
+            showNotification('✅ Calibration saved! Restart app.py to apply.', 'success');
+          } else {
+            showNotification(`❌ Error saving calibration: ${data.message || 'Server error'}`, 'error');
+          }
+        } catch (err) {
+          console.error('Failed to POST /calibrate/save:', err);
+          showNotification('❌ Network error while saving calibration matrix.', 'error');
+        } finally {
+          isSaving = false;
+          btnSave.innerHTML = '💾 Save Calibration';
+          syncUI();
+        }
+      }
+
+      // --- Notifications ---
+      function showNotification(msg, type = 'success') {
+        bannerText.innerHTML = msg;
+        banner.className = `notification-banner ${type}`;
+        banner.style.display = 'flex';
+      }
+
+      function closeNotification() {
+        banner.className = 'notification-banner';
+        banner.style.display = 'none';
+      }
+
+      // --- Keyboard Navigation ---
+      function handleKeyDown(e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        const key = e.key.toLowerCase();
+        if (key === 'r') {
+          resetPoints();
+        } else if (key === 'u') {
+          undoPoint();
+        } else if (key === 's' && points.length === 4 && !isSaving) {
+          saveCalibration();
+        }
+      }
+
+      // --- Attach Global Event Listeners ---
+      canvas.addEventListener('pointerdown', handleCanvasInteraction);
+      window.addEventListener('keydown', handleKeyDown);
+
+      // Expose functions globally for HTML event handlers
+      window.loadSnapshot = loadSnapshot;
+      window.resetPoints = resetPoints;
+      window.undoPoint = undoPoint;
+      window.saveCalibration = saveCalibration;
+      window.closeNotification = closeNotification;
+
+      // Initial snapshot fetch on DOM load
+      document.addEventListener('DOMContentLoaded', loadSnapshot);
+    })();
+  </script>
+</body>
+</html>

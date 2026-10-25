@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EcoZone AI — Smart Energy Management Dashboard</title>
+  <meta name="description" content="Real-time AI-powered zone occupancy & energy management dashboard for smart buildings.">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="dashboard-container">
+
+    <!-- Top Header Bar -->
+    <header class="dashboard-header">
+      <div class="logo-group">
+        <h1 class="logo-text"><span class="logo-gradient">EcoZone</span> AI</h1>
+        <span class="subtitle-badge">Smart Energy Management</span>
+      </div>
+      <div class="header-actions">
+        <div class="mode-toggle-group" id="mode-toggle-group" role="group" aria-label="Detection Mode Selection">
+          <button type="button" class="mode-toggle-btn active" id="mode-btn-ai" data-mode="ai" aria-pressed="true" title="Switch to AI Person Detection">
+            <span class="mode-icon">🤖</span>
+            <span class="mode-label">AI Person Mode</span>
+          </button>
+          <button type="button" class="mode-toggle-btn" id="mode-btn-color" data-mode="color" aria-pressed="false" title="Switch to Color Detection">
+            <span class="mode-icon">🎨</span>
+            <span class="mode-label">Color Mode</span>
+          </button>
+        </div>
+        <a href="/calibrate" class="btn-calibrate" id="btn-calibrate-camera" title="Open Web Camera Calibration">
+          <span class="btn-calibrate-icon">📐</span>
+          <span class="btn-calibrate-text">Calibrate Camera</span>
+        </a>
+        <div class="header-status">
+          <div id="connection-badge" class="connection-badge">
+            <span id="status-dot" class="pulse-dot"></span>
+            <span id="status-text" class="status-text">CONNECTING...</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- KPI Stats Panel -->
+    <section class="stats-panel">
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-label">Temperature</span>
+          <span class="stat-icon">🌡️</span>
+        </div>
+        <div class="stat-value-container">
+          <span id="stat-temp" class="stat-value">--</span>
+          <span class="stat-unit">°C</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-label">Humidity</span>
+          <span class="stat-icon">💧</span>
+        </div>
+        <div class="stat-value-container">
+          <span id="stat-humidity" class="stat-value">--</span>
+          <span class="stat-unit">%</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-label">Fan Speed</span>
+          <span class="stat-icon">🌀</span>
+        </div>
+        <div class="stat-value-container">
+          <span id="stat-fan-speed" class="stat-value">0</span>
+          <span class="stat-unit">%</span>
+        </div>
+        <div class="fan-progress-track">
+          <div id="fan-bar-fill" class="fan-progress-fill" style="width: 0%;"></div>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-label">Total People</span>
+          <span class="stat-icon">👤</span>
+        </div>
+        <div class="stat-value-container">
+          <span id="stat-total-people" class="stat-value">0</span>
+          <span class="stat-unit">count</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Zone Grid + Video Feed split layout -->
+    <div class="main-grid">
+
+      <!-- Left: Zone Occupancy Grid (3x2) -->
+      <section class="zones-section">
+        <h2 class="section-title">Zone Occupancy Grid (3×2)</h2>
+        <div class="zone-grid">
+          <div id="zone-0" class="zone-card">
+            <div class="zone-card-header">
+              <div class="zone-title-group">
+                <span class="zone-title">Zone 0</span>
+                <span class="zone-pos">Row 0 (Left)</span>
+              </div>
+              <span id="zone-badge-0" class="zone-status-text">EMPTY</span>
+            </div>
+            <div class="zone-card-body">
+              <div class="zone-activity-bar"><div id="zone-act-0" class="zone-activity-fill" style="width:0%"></div></div>
+              <div id="zone-dot-0" class="zone-status-dot"></div>
+            </div>
+          </div>
+          <div id="zone-1" class="zone-card">
+            <div class="zone-card-header">
+              <div class="zone-title-group">
+                <span class="zone-title">Zone 1</span>
+                <span class="zone-pos">Row 0 (Right)</span>
+              </div>
+              <span id="zone-badge-1" class="zone-status-text">EMPTY</span>
+            </div>
+            <div class="zone-card-body">
+              <div class="zone-activity-bar"><div id="zone-act-1" class="zone-activity-fill" style="width:0%"></div></div>
+              <div id="zone-dot-1" class="zone-status-dot"></div>
+            </div>
+          </div>
+          <div id="zone-2" class="zone-card">
+            <div class="zone-card-header">
+              <div class="zone-title-group">
+                <span class="zone-title">Zone 2</span>
+                <span class="zone-pos">Row 1 (Left)</span>
+              </div>
+              <span id="zone-badge-2" class="zone-status-text">EMPTY</span>
+            </div>
+            <div class="zone-card-body">
+              <div class="zone-activity-bar"><div id="zone-act-2" class="zone-activity-fill" style="width:0%"></div></div>
+              <div id="zone-dot-2" class="zone-status-dot"></div>
+            </div>
+          </div>
+          <div id="zone-3" class="zone-card">
+            <div class="zone-card-header">
+              <div class="zone-title-group">
+                <span class="zone-title">Zone 3</span>
+                <span class="zone-pos">Row 1 (Right)</span>
+              </div>
+              <span id="zone-badge-3" class="zone-status-text">EMPTY</span>
+            </div>
+            <div class="zone-card-body">
+              <div class="zone-activity-bar"><div id="zone-act-3" class="zone-activity-fill" style="width:0%"></div></div>
+              <div id="zone-dot-3" class="zone-status-dot"></div>
+            </div>
+          </div>
+          <div id="zone-4" class="zone-card">
+            <div class="zone-card-header">
+              <div class="zone-title-group">
+                <span class="zone-title">Zone 4</span>
+                <span class="zone-pos">Row 2 (Left)</span>
+              </div>
+              <span id="zone-badge-4" class="zone-status-text">EMPTY</span>
+            </div>
+            <div class="zone-card-body">
+              <div class="zone-activity-bar"><div id="zone-act-4" class="zone-activity-fill" style="width:0%"></div></div>
+              <div id="zone-dot-4" class="zone-status-dot"></div>
+            </div>
+          </div>
+          <div id="zone-5" class="zone-card">
+            <div class="zone-card-header">
+              <div class="zone-title-group">
+                <span class="zone-title">Zone 5</span>
+                <span class="zone-pos">Row 2 (Right)</span>
+              </div>
+              <span id="zone-badge-5" class="zone-status-text">EMPTY</span>
+            </div>
+            <div class="zone-card-body">
+              <div class="zone-activity-bar"><div id="zone-act-5" class="zone-activity-fill" style="width:0%"></div></div>
+              <div id="zone-dot-5" class="zone-status-dot"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right: AI Vision Feed panel -->
+      <section class="vision-section">
+        <h2 class="section-title">AI Vision Feed
+          <span id="feed-source-badge" class="feed-source-badge">LIVE</span>
+        </h2>
+
+        <!-- Annotated MJPEG stream -->
+        <div class="video-wrapper">
+          <img id="video-feed" src="/video_feed" alt="AI annotated camera feed" class="video-feed-img">
+          <div class="video-overlay-corner">
+          </div>
+        </div>
+
+        <!-- Detection event log -->
+        <div class="detection-log-panel">
+          <div class="log-header">
+            <span class="log-title">📋 Detection Log</span>
+            <button id="btn-clear-log" class="btn-clear" onclick="clearLog()">Clear</button>
+          </div>
+          <div id="detection-log-list" class="log-list">
+            <div class="log-empty">Waiting for detections...</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  </div><!-- /.dashboard-container -->
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+
+      // --- DOM refs ---
+      const connectionBadge = document.getElementById('connection-badge');
+      const statusText      = document.getElementById('status-text');
+      const statTemp        = document.getElementById('stat-temp');
+      const statHumidity    = document.getElementById('stat-humidity');
+      const statFanSpeed    = document.getElementById('stat-fan-speed');
+      const fanBarFill      = document.getElementById('fan-bar-fill');
+      const statTotalPeople = document.getElementById('stat-total-people');
+      const logList         = document.getElementById('detection-log-list');
+
+      // --- Detection Mode Toggle Refs & State ---
+      const modeToggleGroup = document.getElementById('mode-toggle-group');
+      const modeBtnAi       = document.getElementById('mode-btn-ai');
+      const modeBtnColor    = document.getElementById('mode-btn-color');
+
+      let currentMode = 'ai';
+      let isSwitchingMode = false;
+
+      const zoneCards   = [];
+      const zoneBadges  = [];
+      const zoneActBars = [];
+      for (let i = 0; i < 6; i++) {
+        zoneCards[i]   = document.getElementById(`zone-${i}`);
+        zoneBadges[i]  = document.getElementById(`zone-badge-${i}`);
+        zoneActBars[i] = document.getElementById(`zone-act-${i}`);
+      }
+
+      // --- Differential state cache ---
+      const lastState = {
+        zones: [null,null,null,null,null,null],
+        temp: null, humidity: null, fan_speed: null, total_people: null,
+        zone_activity: [0,0,0,0,0,0],
+      };
+
+      let maxActivity = 1;  // for relative activity bar scaling
+
+      // --- SSE connection ---
+      function connectSSE() {
+        const src = new EventSource('/stream');
+        src.onopen = () => {
+          connectionBadge.classList.remove('disconnected');
+          statusText.textContent = 'LIVE STREAM';
+        };
+        src.onmessage = (e) => {
+          try { updateDashboard(JSON.parse(e.data)); }
+          catch(err) { console.error('SSE parse error', err); }
+        };
+        src.onerror = () => {
+          connectionBadge.classList.add('disconnected');
+          statusText.textContent = 'DISCONNECTED';
+          // Auto-reconnect after 3s
+          src.close();
+          setTimeout(connectSSE, 3000);
+        };
+      }
+
+      // --- Dashboard update ---
+      function updateDashboard(d) {
+        // Sync detection mode if provided in SSE stream
+        if (d.mode && d.mode !== currentMode && !isSwitchingMode) {
+          updateModeUI(d.mode);
+        }
+
+        if (d.temp !== undefined && d.temp !== lastState.temp) {
+          statTemp.textContent = Number(d.temp).toFixed(1);
+          lastState.temp = d.temp;
+        }
+        if (d.humidity !== undefined && d.humidity !== lastState.humidity) {
+          statHumidity.textContent = Number(d.humidity).toFixed(1);
+          lastState.humidity = d.humidity;
+        }
+        if (d.fan_speed !== undefined && d.fan_speed !== lastState.fan_speed) {
+          const spd = Math.round(d.fan_speed);
+          statFanSpeed.textContent = spd;
+          if (fanBarFill) fanBarFill.style.width = `${Math.min(100, Math.max(0, spd))}%`;
+          lastState.fan_speed = d.fan_speed;
+        }
+        if (d.total_people !== undefined && d.total_people !== lastState.total_people) {
+          statTotalPeople.textContent = d.total_people;
+          lastState.total_people = d.total_people;
+        }
+
+        // Zone cards
+        if (Array.isArray(d.zones)) {
+          for (let i = 0; i < 6; i++) {
+            const occ = Boolean(d.zones[i]);
+            if (lastState.zones[i] !== occ) {
+              if (zoneCards[i]) {
+                zoneCards[i].classList.toggle('occupied', occ);
+                if (zoneBadges[i]) zoneBadges[i].textContent = occ ? 'OCCUPIED' : 'EMPTY';
+              }
+              lastState.zones[i] = occ;
+            }
+          }
+        }
+
+        // Zone activity bars
+        if (Array.isArray(d.zone_activity)) {
+          const acts = d.zone_activity;
+          maxActivity = Math.max(1, ...acts);
+          for (let i = 0; i < 6; i++) {
+            if (acts[i] !== lastState.zone_activity[i]) {
+              const pct = Math.round((acts[i] / maxActivity) * 100);
+              if (zoneActBars[i]) zoneActBars[i].style.width = pct + '%';
+              lastState.zone_activity[i] = acts[i];
+            }
+          }
+        }
+      }
+
+      // --- Detection log polling (every 2s) ---
+      let logEntries = [];
+
+      async function pollDetectionLog() {
+        try {
+          const res = await fetch('/detection_log');
+          const json = await res.json();
+          if (json.log && json.log.length > 0) {
+            renderLog(json.log);
+          }
+        } catch(e) { /* silent */ }
+      }
+
+      function renderLog(entries) {
+        if (!logList) return;
+        logList.innerHTML = '';
+        // Show newest first
+        const sorted = [...entries].reverse();
+        for (const e of sorted) {
+          const row = document.createElement('div');
+          row.className = 'log-entry';
+          const zonesStr = e.zones.length > 0 ? e.zones.join(', ') : '—';
+          row.innerHTML = `
+            <span class="log-ts">${e.ts}</span>
+            <span class="log-people">👤 ${e.people}</span>
+            <span class="log-zones">→ ${zonesStr}</span>
+            <span class="log-fan">🌀${e.fan}%</span>
+            <span class="log-temp">🌡️${e.temp}°C</span>
+          `;
+          logList.appendChild(row);
+        }
+      }
+
+      window.clearLog = function() {
+        if (logList) {
+          logList.innerHTML = '<div class="log-empty">Log cleared. Waiting...</div>';
+        }
+      };
+
+      // --- Detection Mode Switching & Sync Logic ---
+      /**
+       * Updates the visual UI state of the mode toggle buttons.
+       * @param {string} mode - 'ai' | 'color'
+       */
+      function updateModeUI(mode) {
+        if (!mode) return;
+        const normalizedMode = mode.toLowerCase().trim();
+        currentMode = normalizedMode;
+        if (!modeToggleGroup || !modeBtnAi || !modeBtnColor) return;
+
+        const isAi = (normalizedMode === 'ai');
+        modeToggleGroup.setAttribute('data-active', normalizedMode);
+
+        modeBtnAi.classList.toggle('active', isAi);
+        modeBtnAi.setAttribute('aria-pressed', isAi ? 'true' : 'false');
+
+        modeBtnColor.classList.toggle('active', !isAi);
+        modeBtnColor.setAttribute('aria-pressed', !isAi ? 'true' : 'false');
+      }
+
+      /**
+       * Sends POST request to switch the detection mode with optimistic UI & rollback.
+       * @param {string} targetMode - 'ai' | 'color'
+       */
+      async function switchDetectionMode(targetMode) {
+        if (targetMode === currentMode || isSwitchingMode) return;
+
+        const previousMode = currentMode;
+        isSwitchingMode = true;
+        if (modeToggleGroup) modeToggleGroup.classList.add('is-switching');
+
+        // Optimistic UI update
+        updateModeUI(targetMode);
+
+        try {
+          const response = await fetch('/set_mode', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify({ mode: targetMode })
+          });
+
+          if (!response.ok) {
+            throw new Error(`Server returned HTTP ${response.status}`);
+          }
+
+          const data = await response.json();
+          if (data.mode) {
+            updateModeUI(data.mode);
+          }
+        } catch (err) {
+          console.error('Failed to set detection mode:', err);
+          // Rollback to previous mode on error
+          updateModeUI(previousMode);
+          alert('Mode switch failed: ' + err.message);
+        } finally {
+          isSwitchingMode = false;
+          if (modeToggleGroup) modeToggleGroup.classList.remove('is-switching');
+        }
+      }
+
+      /**
+       * Fetches the initial mode from /get_mode on page load.
+       */
+      async function fetchCurrentMode() {
+        try {
+          const res = await fetch('/get_mode');
+          if (res.ok) {
+            const data = await res.json();
+            if (data.mode) updateModeUI(data.mode);
+          }
+        } catch (err) {
+          console.warn('Could not fetch initial mode, relying on SSE:', err);
+        }
+      }
+
+      // Event listeners for single-click toggle buttons
+      if (modeBtnAi) {
+        modeBtnAi.addEventListener('click', () => switchDetectionMode('ai'));
+      }
+      if (modeBtnColor) {
+        modeBtnColor.addEventListener('click', () => switchDetectionMode('color'));
+      }
+
+      connectSSE();
+      fetchCurrentMode();
+      pollDetectionLog();
+      setInterval(pollDetectionLog, 2000);
+    });
+  </script>
+</body>
+</html>

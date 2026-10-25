@@ -1,0 +1,17 @@
+[Unit]
+Description=EcoZone AI Smart Energy Management Service
+After=network.target
+
+[Service]
+Type=simple
+User=csc_admin
+WorkingDirectory=/home/csc_admin/CSC_EdgeLab/smart_building
+ExecStart=/home/csc_admin/CSC_EdgeLab/smart_building/.venv/bin/python app.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+Environment=IS_SIMULATION=0
+Environment=RELAY_ACTIVE_LOW=0
+
+[Install]
+WantedBy=multi-user.target

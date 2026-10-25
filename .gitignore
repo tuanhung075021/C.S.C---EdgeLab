@@ -1,0 +1,84 @@
+# ==========================================
+# Python & Virtual Environments
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv/
+venv/
+ENV/
+env/
+
+# ==========================================
+# Testing & Code Quality
+# ==========================================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+test_report.json
+
+# ==========================================
+# Runtime Artifacts & Dynamic Calibration
+# ==========================================
+*.npy
+debug_*.jpg
+debug_snapshot.jpg
+*.log
+
+# ==========================================
+# Secrets & Environment Configurations
+# ==========================================
+.env
+.env.*
+*.local
+wifi_secrets.h
+smart_building/esp32_firmware/esp32_cam_server/wifi_secrets.h
+
+# ==========================================
+# AI Agent & Workflow Transient Metadata
+# ==========================================
+.agents/
+task.md
+ORIGINAL_REQUEST.md
+PROJECT.md
+TEST_INFRA.md
+TEST_READY.md
+
+# ==========================================
+# IDE & Operating System Files
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==========================================
+# Arduino & Embedded Build Artifacts
+# (Do NOT ignore OpenVINO model *.bin)
+# ==========================================
+smart_building/esp32_firmware/**/.pio/
+smart_building/esp32_firmware/**/*.elf
+smart_building/esp32_firmware/**/*.bin
+!smart_building/models/**
