@@ -99,21 +99,21 @@ bool initCamera() {
   config.pin_sccb_scl = SIOC_GPIO_NUM;
   config.pin_pwdn     = PWDN_GPIO_NUM;
   config.pin_reset    = RESET_GPIO_NUM;
-  config.xclk_freq_hz = 20000000;
+  config.xclk_freq_hz = 16500000; // 16.5MHz prevents FB-OVF under heavy Wi-Fi streaming
   config.pixel_format = PIXFORMAT_JPEG;
 
   // PSRAM check & performance allocation
   if (psramFound()) {
     Serial.println("[CAMERA] PSRAM detected: Enabling VGA mode with double buffering in PSRAM.");
     config.frame_size   = CAM_FRAMESIZE;    // 640x480 (VGA)
-    config.jpeg_quality = CAM_JPEG_QUALITY; // 10
+    config.jpeg_quality = CAM_JPEG_QUALITY; // 12
     config.fb_count     = CAM_FB_COUNT;     // 2
     config.grab_mode    = CAMERA_GRAB_LATEST;
     config.fb_location  = CAMERA_FB_IN_PSRAM;
   } else {
-    Serial.println("[CAMERA_WARNING] PSRAM not found! Falling back to SRAM single buffer mode.");
-    config.frame_size   = FRAMESIZE_VGA;
-    config.jpeg_quality = 12;
+    Serial.println("[CAMERA_WARNING] PSRAM not found! Falling back to QVGA to prevent FB-OVF in DRAM.");
+    config.frame_size   = FRAMESIZE_QVGA;   // 320x240 fallback to fit safely in internal SRAM
+    config.jpeg_quality = 14;
     config.fb_count     = 1;
     config.grab_mode    = CAMERA_GRAB_WHEN_EMPTY;
     config.fb_location  = CAMERA_FB_IN_DRAM;
@@ -142,11 +142,35 @@ bool initCamera() {
 // Connects to WiFi network with Serial logging and timeout error handling
 // ------------------------------------------------------------------
 void setupWiFi() {
-  Serial.print("[WIFI] Connecting to network: ");
+  Serial.print("[WIFI] Target network: ");
   Serial.println(WIFI_SSID);
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false); // Disable WiFi sleep to reduce streaming latency and packet drops
+
+  // Scan nearby 2.4GHz Wi-Fi networks to diagnose visibility
+  Serial.println("[WIFI] Scanning nearby 2.4GHz Wi-Fi networks...");
+  int n = WiFi.scanNetworks();
+  if (n == 0) {
+    Serial.println("[WIFI] No 2.4GHz networks found! Check ESP32 antenna.");
+  } else {
+    Serial.printf("[WIFI] Found %d networks nearby:\n", n);
+    bool foundTarget = false;
+    for (int i = 0; i < n; ++i) {
+      String ssid = WiFi.SSID(i);
+      Serial.printf("  [%d] \"%s\" (Signal: %d dBm)\n", i + 1, ssid.c_str(), WiFi.RSSI(i));
+      if (ssid == WIFI_SSID) {
+        foundTarget = true;
+      }
+    }
+    if (foundTarget) {
+      Serial.printf("[WIFI] Target \"%s\" is VISIBLE! Attempting connection...\n", WIFI_SSID);
+    } else {
+      Serial.printf("[WIFI_WARNING] Target \"%s\" was NOT FOUND in 2.4GHz scan!\n", WIFI_SSID);
+      Serial.println("[TIP] If using Phone Hotspot: Turn ON 'Maximize Compatibility' (iPhone) or set AP Band to 2.4GHz (Android).");
+    }
+  }
+
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   unsigned long startAttemptTime = millis();
@@ -158,6 +182,7 @@ void setupWiFi() {
 
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("\n[WIFI_ERROR] WiFi connection failed or timed out!");
+    Serial.println("[TIP] Make sure hotspot/Wi-Fi is 2.4GHz (not 5GHz) and password is correct.");
     Serial.println("[SYSTEM] Rebooting ESP32 in 5 seconds...");
     delay(5000);
     ESP.restart();
@@ -202,16 +227,19 @@ void startStreamServer() {
 // ------------------------------------------------------------------
 void setup() {
   Serial.begin(115200);
-  Serial.setDebugOutput(true);
+  Serial.setDebugOutput(false); // Suppress low-level driver spam
   Serial.println("\n=== EcoZone AI ESP32-S3 Camera Server Starting ===");
 
+  // 1. Initialize Camera FIRST while internal DMA memory is clean and unfragmented
   if (!initCamera()) {
     Serial.println("[CRITICAL] Camera initialization failed! Rebooting in 5 seconds...");
     delay(5000);
     ESP.restart();
   }
 
+  // 2. Initialize WiFi
   setupWiFi();
+
   startStreamServer();
   udp.begin(UDP_PORT);
 

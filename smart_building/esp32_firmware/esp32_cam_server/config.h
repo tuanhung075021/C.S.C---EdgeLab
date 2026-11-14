@@ -17,7 +17,7 @@
 #endif
 
 #define STREAM_SERVER_PORT 81
-#define WIFI_TIMEOUT_MS   15000
+#define WIFI_TIMEOUT_MS   20000
 
 // ==========================================
 // Camera Model & Pinout Definition
