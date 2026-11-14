@@ -239,13 +239,11 @@ class VisionStream:
         frame = np.zeros((height, width, 3), dtype=np.uint8)
         frame[:] = (46, 26, 26)  # Dark purple-blue background
 
-        # Draw simulated zone grid lines (2 rows x 3 cols)
-        for c in range(1, 3):
-            x = int(c * (width / 3.0))
-            cv2.line(frame, (x, 0), (x, height), (100, 100, 100), 1)
-        for r in range(1, 2):
-            y = int(r * (height / 2.0))
-            cv2.line(frame, (0, y), (width, y), (100, 100, 100), 1)
+        # Draw simulated zone grid lines (3 rows x 2 cols)
+        cv2.line(frame, (int(width / 2.0), 0), (int(width / 2.0), height), (80, 80, 80), 1)
+        for r in range(1, 3):
+            y = int(r * (height / 3.0))
+            cv2.line(frame, (0, y), (width, y), (80, 80, 80), 1)
 
         # Calculate moving synthetic person position
         self._sim_step += 1
@@ -255,6 +253,10 @@ class VisionStream:
         # Draw synthetic person (head + body) in green (BGR: 0, 255, 0)
         cv2.circle(frame, (cx, cy - 30), 15, (0, 255, 0), -1)  # Green head
         cv2.rectangle(frame, (cx - 20, cy - 15), (cx + 20, cy + 40), (0, 255, 0), -1)  # Green body
+
+        # Draw yellow proxy marker (BGR: 0, 255, 255) for Color Mode testing
+        # Radius 16 gives area pi * 16^2 = 804 px^2 (> COLOR_MIN_CONTOUR_AREA=500)
+        cv2.circle(frame, (cx, cy + 12), 16, (0, 255, 255), -1)
 
         # Text overlay
         cv2.putText(frame, "SIMULATION MODE - SYNTHETIC STREAM", (20, 30),

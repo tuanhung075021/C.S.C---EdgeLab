@@ -132,7 +132,14 @@ class GPIOController:
         """
         if not self.is_simulation and self.GPIO is not None:
             if self.pwm is not None:
-                self.pwm.stop()
-            self.GPIO.cleanup()
+                try:
+                    self.pwm.stop()
+                except Exception:
+                    pass
+                self.pwm = None
+            try:
+                self.GPIO.cleanup()
+            except Exception:
+                pass
         else:
             print("[SIMULATION] GPIOController cleaned up.")

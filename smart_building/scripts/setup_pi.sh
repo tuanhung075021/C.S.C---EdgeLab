@@ -11,7 +11,7 @@ APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 echo "=== [1/5] Updating APT package repositories and installing system dependencies ==="
 sudo apt update
-sudo apt install -y python3-venv python3-pip libgpiod2
+sudo apt install -y python3-venv python3-pip gpiod swig python3-dev gcc liblgpio-dev || sudo apt install -y python3-venv python3-pip libgpiod2
 
 echo "=== [2/5] Setting up Python virtual environment ==="
 if [ ! -d "${APP_DIR}/.venv" ]; then
