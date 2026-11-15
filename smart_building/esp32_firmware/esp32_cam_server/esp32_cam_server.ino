@@ -2,6 +2,7 @@
 #include <WiFiUdp.h>
 #include "esp_camera.h"
 #include "esp_http_server.h"
+#include "lwip/sockets.h"
 #include "img_converters.h"
 #include "driver/gpio.h"
 #include "config.h"
@@ -88,6 +89,13 @@ static esp_err_t stream_handler(httpd_req_t *req) {
   // Set HTTP CORS headers to allow cross-origin requests from web clients
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
+  // Prevent half-open TCP socket stalls from blocking single-threaded httpd
+  int sockfd = httpd_req_to_sockfd(req);
+  if (sockfd >= 0) {
+    struct timeval snd_timeout = { .tv_sec = 3, .tv_usec = 0 };
+    setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &snd_timeout, sizeof(snd_timeout));
+  }
+
   Serial.println("[STREAM] MJPEG stream client connected.");
 
   while (true) {
@@ -173,9 +181,9 @@ bool initCamera() {
 
   const CameraProfile profiles[] = {
     {
-      "PSRAM UXGA-buf -> VGA JPEG 10MHz",
-      PIXFORMAT_JPEG, FRAMESIZE_UXGA, FRAMESIZE_VGA,
-      10000000, 10, 2, CAMERA_GRAB_WHEN_EMPTY
+      "PSRAM UXGA-buf -> Config JPEG 10MHz",
+      PIXFORMAT_JPEG, FRAMESIZE_UXGA, CAM_FRAMESIZE,
+      10000000, CAM_JPEG_QUALITY, CAM_FB_COUNT, CAMERA_GRAB_WHEN_EMPTY
     },
     {
       "PSRAM UXGA-buf -> QVGA JPEG 10MHz",
@@ -242,10 +250,11 @@ bool initCamera() {
     if (s != NULL) {
       Serial.printf("[CAMERA] Sensor PID: 0x%x\n", s->id.PID);
       if (s->id.PID == OV3660_PID) {
-        s->set_vflip(s, 1);
         s->set_brightness(s, 1);
         s->set_saturation(s, -2);
       }
+      s->set_vflip(s, CAM_VFLIP);
+      s->set_hmirror(s, CAM_HMIRROR);
       if (p.pixel_format == PIXFORMAT_JPEG && p.target_frame_size != p.init_frame_size) {
         s->set_framesize(s, p.target_frame_size);
       }
@@ -361,6 +370,7 @@ void startStreamServer() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = STREAM_SERVER_PORT;
   config.ctrl_port   = STREAM_SERVER_PORT + 32688; // 81 + 32688 = 32769 (prevents port 80 collisions)
+  config.lru_purge_enable = true; // Evict oldest stale client when socket table fills
 
   httpd_uri_t stream_uri = {
     .uri       = "/stream",

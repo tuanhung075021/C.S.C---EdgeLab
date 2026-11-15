@@ -82,8 +82,8 @@ def setup_model() -> bool:
             model = YOLO(str(PT_FILE))
         else:
             logger.info(f"Downloading PyTorch weights to '{PT_FILE}'...")
-            print("[setup_model] Downloading 'yolov8n.pt'...")
-            model = YOLO("yolov8n.pt")
+            print(f"[setup_model] Downloading '{PT_FILE}'...")
+            model = YOLO(str(PT_FILE))
             # If downloaded to current working directory, relocate to MODELS_DIR
             root_pt = PROJECT_ROOT / "yolov8n.pt"
             if root_pt.exists() and not PT_FILE.exists():

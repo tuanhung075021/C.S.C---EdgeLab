@@ -11,7 +11,9 @@ Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
 Environment=IS_SIMULATION=0
-Environment=RELAY_ACTIVE_LOW=0
+Environment=RELAY_ACTIVE_LOW=1
+Environment=ZONE_HOLD_SECONDS=3.0
+Environment=SYNTHETIC_HARDWARE_LOCKOUT=1
 
 [Install]
 WantedBy=multi-user.target

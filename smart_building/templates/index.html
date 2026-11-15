@@ -19,14 +19,15 @@
       <div class="logo-group">
         <h1 class="logo-text"><span class="logo-gradient">EcoZone</span> AI</h1>
         <span class="subtitle-badge">Smart Energy Management</span>
+        <span id="energy-savings-badge" class="subtitle-badge" title="Real-time Power & Energy Savings">⚡ Saving --%</span>
       </div>
       <div class="header-actions">
         <div class="mode-toggle-group" id="mode-toggle-group" role="group" aria-label="Detection Mode Selection">
-          <button type="button" class="mode-toggle-btn active" id="mode-btn-ai" data-mode="ai" aria-pressed="true" title="Switch to AI Person Detection">
+          <button type="button" class="mode-toggle-btn" id="mode-btn-ai" data-mode="ai" aria-pressed="false" title="Switch to AI Person Detection">
             <span class="mode-icon">🤖</span>
             <span class="mode-label">AI Person Mode</span>
           </button>
-          <button type="button" class="mode-toggle-btn" id="mode-btn-color" data-mode="color" aria-pressed="false" title="Switch to Color Detection">
+          <button type="button" class="mode-toggle-btn active" id="mode-btn-color" data-mode="color" aria-pressed="true" title="Switch to Color Detection">
             <span class="mode-icon">🎨</span>
             <span class="mode-label">Color Mode</span>
           </button>
@@ -222,13 +223,15 @@
       const fanBarFill      = document.getElementById('fan-bar-fill');
       const statTotalPeople = document.getElementById('stat-total-people');
       const logList         = document.getElementById('detection-log-list');
+      const energyBadge     = document.getElementById('energy-savings-badge');
+      const feedSourceBadge = document.getElementById('feed-source-badge');
 
       // --- Detection Mode Toggle Refs & State ---
       const modeToggleGroup = document.getElementById('mode-toggle-group');
       const modeBtnAi       = document.getElementById('mode-btn-ai');
       const modeBtnColor    = document.getElementById('mode-btn-color');
 
-      let currentMode = 'ai';
+      let currentMode = 'color';
       let isSwitchingMode = false;
 
       const zoneCards   = [];
@@ -309,12 +312,22 @@
           }
         }
 
-        // Zone activity bars
+        // Energy KPI & Camera source badge
+        if (energyBadge && d.savings_pct !== undefined && d.power_watts !== undefined) {
+          energyBadge.textContent = `⚡ ${Number(d.power_watts).toFixed(0)}W · Saved ${Number(d.savings_pct).toFixed(0)}%`;
+        }
+        if (feedSourceBadge && d.camera_source) {
+          feedSourceBadge.textContent = String(d.camera_source).toUpperCase();
+        }
+
+        // Zone activity bars (re-scale all 6 bars whenever maxActivity changes)
         if (Array.isArray(d.zone_activity)) {
           const acts = d.zone_activity;
+          const prevMax = maxActivity;
           maxActivity = Math.max(1, ...acts);
+          const scaleChanged = (maxActivity !== prevMax);
           for (let i = 0; i < 6; i++) {
-            if (acts[i] !== lastState.zone_activity[i]) {
+            if (scaleChanged || acts[i] !== lastState.zone_activity[i]) {
               const pct = Math.round((acts[i] / maxActivity) * 100);
               if (zoneActBars[i]) zoneActBars[i].style.width = pct + '%';
               lastState.zone_activity[i] = acts[i];
@@ -330,8 +343,12 @@
         try {
           const res = await fetch('/detection_log');
           const json = await res.json();
-          if (json.log && json.log.length > 0) {
-            renderLog(json.log);
+          if (Array.isArray(json.log)) {
+            if (json.log.length > 0) {
+              renderLog(json.log);
+            } else if (logList && !logList.querySelector('.log-empty')) {
+              logList.innerHTML = '<div class="log-empty">Waiting for detections...</div>';
+            }
           }
         } catch(e) { /* silent */ }
       }
@@ -356,7 +373,10 @@
         }
       }
 
-      window.clearLog = function() {
+      window.clearLog = async function() {
+        try {
+          await fetch('/detection_log/clear', { method: 'POST' });
+        } catch(e) { /* ignore network errors */ }
         if (logList) {
           logList.innerHTML = '<div class="log-empty">Log cleared. Waiting...</div>';
         }

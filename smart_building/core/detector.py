@@ -17,6 +17,8 @@ try:
     CONF_THRESHOLD = getattr(config, "CONFIDENCE_THRESHOLD", 0.35)
     VALID_CLASS_IDS = getattr(config, "VALID_CLASS_IDS", [0])
     IS_SIMULATION = getattr(config, "IS_SIMULATION", False)
+    WARP_WIDTH = getattr(config, "WARP_WIDTH", 600)
+    WARP_HEIGHT = getattr(config, "WARP_HEIGHT", 400)
 except ImportError:
     try:
         from .. import config  # type: ignore
@@ -24,11 +26,15 @@ except ImportError:
         CONF_THRESHOLD = getattr(config, "CONFIDENCE_THRESHOLD", 0.35)
         VALID_CLASS_IDS = getattr(config, "VALID_CLASS_IDS", [0])
         IS_SIMULATION = getattr(config, "IS_SIMULATION", False)
+        WARP_WIDTH = getattr(config, "WARP_WIDTH", 600)
+        WARP_HEIGHT = getattr(config, "WARP_HEIGHT", 400)
     except ImportError:
         MODEL_XML = "models/yolov8n_openvino_model/yolov8n.xml"
         CONF_THRESHOLD = 0.35
         VALID_CLASS_IDS = [0]
         IS_SIMULATION = False
+        WARP_WIDTH = 600
+        WARP_HEIGHT = 400
 
 from core.transform import get_zone_id
 
@@ -73,7 +79,14 @@ class YOLOv8OpenVINODetector:
             try:
                 core = Core()
                 model = core.read_model(model=self.model_xml)
-                self.compiled_model = core.compile_model(model=model, device_name="CPU")
+                try:
+                    self.compiled_model = core.compile_model(
+                        model=model,
+                        device_name="CPU",
+                        config={"PERFORMANCE_HINT": "LATENCY", "INFERENCE_NUM_THREADS": 4},
+                    )
+                except Exception:
+                    self.compiled_model = core.compile_model(model=model, device_name="CPU")
                 self.input_layer = self.compiled_model.input(0)
                 self.output_layer = self.compiled_model.output(0)
                 self.use_real_model = True
@@ -85,7 +98,12 @@ class YOLOv8OpenVINODetector:
             logger.info("OpenVINO IR model unavailable at %s or simulation mode active. Using mock detection fallback.", self.model_xml)
             self.use_real_model = False
 
-    def detect(self, frame: np.ndarray, transformer=None) -> Tuple[List[int], int]:
+    def detect(
+        self,
+        frame: np.ndarray,
+        transformer=None,
+        force_mock: bool = False,
+    ) -> Tuple[List[int], int]:
         """
         Thread-safe detection and zone mapping.
         Accepts an optional PerspectiveTransformer; if provided, detection runs on the raw
@@ -98,32 +116,71 @@ class YOLOv8OpenVINODetector:
             total_people_count: int
         """
         with self._lock:
-            if frame is None or frame.size == 0:
+            if (
+                frame is None
+                or not isinstance(frame, np.ndarray)
+                or frame.size == 0
+                or frame.ndim != 3
+                or frame.shape[2] != 3
+                or not np.issubdtype(frame.dtype, np.number)
+            ):
                 return [0] * 6, 0
 
-            if self.use_real_model and self.compiled_model is not None:
+            if force_mock:
+                return self._detect_mock(frame, transformer=transformer)
+            elif self.use_real_model and self.compiled_model is not None:
                 return self._detect_openvino(frame, transformer=transformer)
             else:
-                return self._detect_mock(frame)
+                return self._detect_mock(frame, transformer=transformer)
 
     def _detect_openvino(self, frame: np.ndarray, transformer=None) -> Tuple[List[int], int]:
+        if (
+            frame is None
+            or not isinstance(frame, np.ndarray)
+            or frame.size == 0
+            or frame.ndim != 3
+            or frame.shape[2] != 3
+            or not np.issubdtype(frame.dtype, np.number)
+        ):
+            return [0] * 6, 0
+
+        if not self.valid_class_ids:
+            return [0] * 6, 0
+
+        if frame.dtype != np.uint8:
+            frame = np.clip(
+                np.nan_to_num(frame, nan=0.0, posinf=255.0, neginf=0.0),
+                0,
+                255,
+            ).astype(np.uint8)
+
         orig_h, orig_w = frame.shape[:2]
 
-        # Resize to 640x640 network input
-        resized = cv2.resize(frame, (640, 640))
-        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-        input_tensor = np.expand_dims(rgb.transpose(2, 0, 1), axis=0).astype(np.float32) / 255.0
+        # Single C++ pass: scale 1/255, resize to 640x640, BGR->RGB, HWC->NCHW
+        input_tensor = cv2.dnn.blobFromImage(
+            frame,
+            scalefactor=1.0 / 255.0,
+            size=(640, 640),
+            swapRB=True,
+            crop=False,
+        )
 
         results = self.compiled_model([input_tensor])[self.output_layer]
-        predictions = results[0].T  # Shape: (8400, 84)
+        raw_out = results[0]  # Shape: (84, 8400)
 
-        # Get max score across all allowed object classes
-        class_scores = predictions[:, 4:]
-        scores = np.max(class_scores[:, self.valid_class_ids], axis=1)
-        mask = scores >= self.conf_threshold
+        # Slice target class scores directly before transposing to avoid copying full (84, 8400) tensor
+        if len(self.valid_class_ids) == 1:
+            scores = raw_out[4 + self.valid_class_ids[0], :]
+        else:
+            scores = np.max(raw_out[[4 + cid for cid in self.valid_class_ids], :], axis=0)
 
-        valid_preds = predictions[mask]
-        valid_scores = scores[mask]
+        valid_indices = np.flatnonzero(scores >= self.conf_threshold)
+
+        if valid_indices.size == 0:
+            return [0] * 6, 0
+
+        valid_preds = raw_out[:, valid_indices].T  # Shape: (M, 84)
+        valid_scores = scores[valid_indices]
 
         if len(valid_preds) == 0:
             return [0] * 6, 0
@@ -151,7 +208,7 @@ class YOLOv8OpenVINODetector:
         else:
             indices = indices.flatten()
 
-        total_people = len(indices)
+        total_people = 0
 
         for idx in indices:
             pred = valid_preds[idx]
@@ -160,11 +217,13 @@ class YOLOv8OpenVINODetector:
             y_max_raw = (cy_net + h_net / 2.0) * scale_y
 
             # If transformer available: map anchor point through perspective to get
-            # Bird's-Eye coordinates, then compute zone from those coords.
+            # Bird's-Eye coordinates, filter outside calibrated ROI, then compute zone.
             if transformer is not None:
                 try:
                     pt_warped = transformer.transform_point(x_center_raw, y_max_raw)
-                    x_center, y_max = pt_warped[0], pt_warped[1]
+                    x_center, y_max = float(pt_warped[0]), float(pt_warped[1])
+                    if not (0.0 <= x_center <= float(WARP_WIDTH) and 0.0 <= y_max <= float(WARP_HEIGHT)):
+                        continue
                 except Exception:
                     x_center, y_max = x_center_raw, y_max_raw
             else:
@@ -172,16 +231,33 @@ class YOLOv8OpenVINODetector:
 
             zone_id = get_zone_id(x_center, y_max)
             occupied_zones[zone_id] = 1
+            total_people += 1
 
         return occupied_zones, total_people
 
-    def _detect_mock(self, frame: np.ndarray) -> Tuple[List[int], int]:
+    def _detect_mock(self, frame: np.ndarray, transformer=None) -> Tuple[List[int], int]:
         """
         Mock detection engine for simulation mode or missing model files.
         Detects green synthetic target shapes in frames (from synthetic stream) or returns standard mock results.
         """
+        if (
+            frame is None
+            or not isinstance(frame, np.ndarray)
+            or frame.size == 0
+            or frame.ndim != 3
+            or frame.shape[2] != 3
+            or not np.issubdtype(frame.dtype, np.number)
+        ):
+            return [0] * 6, 0
+
+        if frame.dtype != np.uint8:
+            frame = np.clip(
+                np.nan_to_num(frame, nan=0.0, posinf=255.0, neginf=0.0),
+                0,
+                255,
+            ).astype(np.uint8)
+
         occupied_zones = [0] * 6
-        orig_h, orig_w = frame.shape[:2]
 
         # Convert to HSV for robust color detection under different lighting
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -191,15 +267,23 @@ class YOLOv8OpenVINODetector:
         upper_green = np.array([85, 255, 255], dtype=np.uint8)
         mask = cv2.inRange(hsv, lower_green, upper_green)
 
-
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         valid_contours = [c for c in contours if cv2.contourArea(c) > 50]
 
         total_people = 0
         for contour in valid_contours:
             x, y, w, h = cv2.boundingRect(contour)
-            x_center = x + w / 2.0
-            y_max = y + h
+            x_center = float(x + w / 2.0)
+            y_max = float(y + h)
+
+            if transformer is not None:
+                try:
+                    pt_warped = transformer.transform_point(x_center, y_max)
+                    x_center, y_max = float(pt_warped[0]), float(pt_warped[1])
+                    if not (0.0 <= x_center <= float(WARP_WIDTH) and 0.0 <= y_max <= float(WARP_HEIGHT)):
+                        continue
+                except Exception:
+                    pass
 
             zone_id = get_zone_id(x_center, y_max)
             occupied_zones[zone_id] = 1

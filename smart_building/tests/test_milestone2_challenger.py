@@ -33,15 +33,24 @@ from app import app as flask_app
 
 @pytest.fixture(autouse=True, scope="module")
 def module_matrix_cleanup():
-    """Ensure perspective_matrix.npy does not exist before and after module test run."""
+    """Preserve any existing perspective_matrix.npy across the module test run."""
     matrix_path = os.path.join(PROJECT_ROOT, "perspective_matrix.npy")
+    backup_bytes = None
     if os.path.exists(matrix_path):
         try:
+            with open(matrix_path, "rb") as f:
+                backup_bytes = f.read()
             os.remove(matrix_path)
         except Exception:
             pass
     yield
-    if os.path.exists(matrix_path):
+    if backup_bytes is not None:
+        try:
+            with open(matrix_path, "wb") as f:
+                f.write(backup_bytes)
+        except Exception:
+            pass
+    elif os.path.exists(matrix_path):
         try:
             os.remove(matrix_path)
         except Exception:

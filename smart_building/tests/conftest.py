@@ -90,15 +90,24 @@ setup_module_stubs()
 # -----------------------------------------------------------------------------
 @pytest.fixture(autouse=True)
 def clean_matrix_environment():
-    """Ensure perspective_matrix.npy is deleted before and after each test unless explicitly tested."""
+    """Back up any pre-existing perspective_matrix.npy, provide clean state per test, and restore afterward."""
     matrix_path = os.path.join(PROJECT_ROOT, "perspective_matrix.npy")
+    backup_bytes = None
     if os.path.exists(matrix_path):
         try:
+            with open(matrix_path, "rb") as f:
+                backup_bytes = f.read()
             os.remove(matrix_path)
         except Exception:
             pass
     yield matrix_path
-    if os.path.exists(matrix_path):
+    if backup_bytes is not None:
+        try:
+            with open(matrix_path, "wb") as f:
+                f.write(backup_bytes)
+        except Exception:
+            pass
+    elif os.path.exists(matrix_path):
         try:
             os.remove(matrix_path)
         except Exception:

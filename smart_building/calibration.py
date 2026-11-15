@@ -19,11 +19,13 @@ try:
     import config
     WARP_WIDTH = getattr(config, "WARP_WIDTH", 600)
     WARP_HEIGHT = getattr(config, "WARP_HEIGHT", 400)
-    ESP32_STREAM_URL = getattr(config, "ESP32_STREAM_URL", "http://192.168.137.31:81/stream")
+    ESP32_STREAM_URL = getattr(config, "ESP32_STREAM_URL", "http://172.20.10.2:81/stream")
+    PERSPECTIVE_MATRIX_PATH = getattr(config, "PERSPECTIVE_MATRIX_PATH", "perspective_matrix.npy")
 except ImportError:
     WARP_WIDTH = 600
     WARP_HEIGHT = 400
-    ESP32_STREAM_URL = "http://192.168.137.31:81/stream"
+    ESP32_STREAM_URL = "http://172.20.10.2:81/stream"
+    PERSPECTIVE_MATRIX_PATH = "perspective_matrix.npy"
 
 # Default table corner points (TL, TR, BR, BL)
 DEFAULT_POINTS = np.float32([[50, 50], [550, 50], [550, 350], [50, 350]])
@@ -89,9 +91,10 @@ def acquire_frame(source: str = None, headless: bool = False) -> np.ndarray:
     synthetic[:] = (40, 40, 50)
     # Visual grid lines and border
     cv2.rectangle(synthetic, (50, 50), (550, 350), (200, 200, 200), 2)
-    cv2.line(synthetic, (216, 50), (216, 350), (100, 100, 100), 1)
-    cv2.line(synthetic, (383, 50), (383, 350), (100, 100, 100), 1)
-    cv2.line(synthetic, (50, 200), (550, 200), (100, 100, 100), 1)
+    # 3 Rows x 2 Cols interior grid lines matching AGENTS.md Invariant 1
+    cv2.line(synthetic, (300, 50), (300, 350), (100, 100, 100), 1)
+    cv2.line(synthetic, (50, 150), (550, 150), (100, 100, 100), 1)
+    cv2.line(synthetic, (50, 250), (550, 250), (100, 100, 100), 1)
     cv2.putText(synthetic, "CALIBRATION TEST FRAME (640x480)", (120, 35),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
     return synthetic
@@ -180,7 +183,7 @@ def parse_args():
     parser.add_argument("--headless", action="store_true", help="Run in headless non-interactive mode")
     parser.add_argument("--points", type=str, help="Comma-separated 8 floats: x1,y1,x2,y2,x3,y3,x4,y4")
     parser.add_argument("--source", type=str, help="Video stream URL, video file path, or camera index")
-    parser.add_argument("--output", type=str, default="perspective_matrix.npy", help="Output numpy file path")
+    parser.add_argument("--output", type=str, default=PERSPECTIVE_MATRIX_PATH, help="Output numpy file path")
     return parser.parse_args()
 
 
@@ -214,8 +217,8 @@ def main():
         print("[calibration] Headless mode active. Using default table corners:")
         src_pts = DEFAULT_POINTS.copy()
 
-    # Apply rotation mapping to destination points
-    dst_pts = np.roll(BASE_DST_POINTS, rotation_index, axis=0)
+    # Apply clockwise rotation mapping to destination points (-rotation_index aligns TL->TR->BR->BL clockwise)
+    dst_pts = np.roll(BASE_DST_POINTS, -rotation_index, axis=0)
 
     # Compute 3x3 Homography Matrix
     print(f"[calibration] Computing Homography matrix with rotation {rotation_index*90}deg...")

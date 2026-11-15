@@ -64,6 +64,13 @@ DHT_PIN: int = 4  # GPIO4 Data Pin
 
 # Relay Hardware Configuration
 RELAY_ACTIVE_LOW: bool = os.getenv("RELAY_ACTIVE_LOW", "0").lower() in ("1", "true", "yes")
+ZONE_HOLD_SECONDS: float = float(os.getenv("ZONE_HOLD_SECONDS", "3.0"))
+SYNTHETIC_HARDWARE_LOCKOUT: bool = os.getenv("SYNTHETIC_HARDWARE_LOCKOUT", "1").lower() in ("1", "true", "yes")
+ESP32_REPROBE_INTERVAL: float = float(os.getenv("ESP32_REPROBE_INTERVAL", "5.0"))
+
+# Energy Telemetry Configuration (Watts per Zone & Max Fan Power)
+ZONE_LIGHT_WATTS: float = float(os.getenv("ZONE_LIGHT_WATTS", "10.0"))
+FAN_MAX_WATTS: float = float(os.getenv("FAN_MAX_WATTS", "5.0"))
 
 # Vision & Perspective Transform Parameters
 WARP_WIDTH: int = 600
@@ -74,7 +81,7 @@ CELL_WIDTH: int = WARP_WIDTH // GRID_COLS  # 300px
 CELL_HEIGHT: int = WARP_HEIGHT // GRID_ROWS  # 133px
 
 # AI Detection Parameters
-CONFIDENCE_THRESHOLD: float = 0.35  # Clean person detection threshold
+CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.35"))  # Clean person detection threshold
 PERSON_CLASS_ID: int = 0  # COCO class ID for person
 VALID_CLASS_IDS: list[int] = [0]  # Person only
 
@@ -84,7 +91,7 @@ COLOR_YELLOW_HSV_UPPER: list[int] = [35, 255, 255]
 COLOR_MIN_CONTOUR_AREA: int = 500
 
 # Default Detection Mode ('color' or 'ai')
-DEFAULT_DETECTION_MODE: str = "color"
+DEFAULT_DETECTION_MODE: str = os.getenv("DEFAULT_DETECTION_MODE", "color")
 
 # Base Directory Anchor
 BASE_DIR: str = os.path.dirname(os.path.abspath(__file__))

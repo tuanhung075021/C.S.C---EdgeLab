@@ -5,6 +5,7 @@ Provides Homography warping to 600x400 top-down view and zone ID lookup.
 
 import math
 import logging
+import threading
 from typing import Optional, Tuple
 import numpy as np
 import cv2
@@ -110,16 +111,22 @@ class PerspectiveTransformer:
     def __init__(self, matrix_path: Optional[str] = None) -> None:
         self.matrix_path = matrix_path if matrix_path is not None else MATRIX_PATH
         self.output_size = (WARP_WIDTH, WARP_HEIGHT)
+        self._lock = threading.RLock()
         self.M = self._load_matrix(self.matrix_path)
 
     @property
     def matrix(self) -> np.ndarray:
-        """Alias for self.M providing access to the 3x3 transform matrix."""
-        return self.M
+        """Alias for self.M providing thread-safe access to the 3x3 transform matrix."""
+        with self._lock:
+            return self.M
 
     @matrix.setter
     def matrix(self, val: np.ndarray) -> None:
-        self.M = val
+        arr = np.asarray(val, dtype=np.float32)
+        if arr.shape != (3, 3):
+            raise ValueError(f"Expected 3x3 transformation matrix, got {arr.shape}")
+        with self._lock:
+            self.M = arr
 
     def _load_matrix(self, path: str) -> np.ndarray:
         try:
@@ -142,7 +149,9 @@ class PerspectiveTransformer:
         if frame is None or frame.size == 0:
             return np.zeros((self.output_size[1], self.output_size[0], 3), dtype=np.uint8)
 
-        return cv2.warpPerspective(frame, self.M, self.output_size)
+        with self._lock:
+            M_local = self.M.copy()
+        return cv2.warpPerspective(frame, M_local, self.output_size)
 
     def transform_point(self, x: float, y: float) -> Tuple[float, float]:
         """
@@ -155,8 +164,11 @@ class PerspectiveTransformer:
         except (ValueError, TypeError):
             return (0.0, 0.0)
 
+        with self._lock:
+            M_local = self.M.copy()
+
         vec = np.array([px, py, 1.0], dtype=np.float32)
-        transformed = self.M @ vec
+        transformed = M_local @ vec
         w = transformed[2]
         if abs(w) > 1e-7:
             return (float(transformed[0] / w), float(transformed[1] / w))
@@ -169,6 +181,8 @@ class PerspectiveTransformer:
         """
         if points is None or len(points) == 0:
             return np.empty((0, 2), dtype=np.float32)
+        with self._lock:
+            M_local = self.M.copy()
         pts = np.asarray(points, dtype=np.float32).reshape(-1, 1, 2)
-        warped = cv2.perspectiveTransform(pts, self.M)
+        warped = cv2.perspectiveTransform(pts, M_local)
         return warped.reshape(-1, 2)

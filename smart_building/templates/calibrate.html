@@ -640,9 +640,12 @@
           <button id="btn-save" class="btn-save-primary" onclick="saveCalibration()" disabled>
             💾 Save Calibration
           </button>
+          <button id="btn-reset-matrix" class="btn-action" style="width:100%; justify-content:center;" onclick="resetServerCalibration()">
+            ♻️ Reset Server Matrix
+          </button>
           <div style="font-size: 0.78rem; color: var(--text-muted, #8b9ab4); text-align: center; line-height: 1.4;">
             Saves homography to <code>perspective_matrix.npy</code>.<br>
-            Restart <code>app.py</code> to apply to live vision pipeline.
+            Applied live to the active vision pipeline immediately.
           </div>
         </div>
 
@@ -972,7 +975,7 @@
           const data = await response.json();
 
           if (response.ok && data.status === 'ok') {
-            showNotification('✅ Calibration saved! Restart app.py to apply.', 'success');
+            showNotification('✅ Calibration saved and applied live to vision pipeline!', 'success');
           } else {
             showNotification(`❌ Error saving calibration: ${data.message || 'Server error'}`, 'error');
           }
@@ -983,6 +986,21 @@
           isSaving = false;
           btnSave.innerHTML = '💾 Save Calibration';
           syncUI();
+        }
+      }
+
+      async function resetServerCalibration() {
+        try {
+          const response = await fetch('/calibrate/reset', { method: 'POST' });
+          const data = await response.json();
+          if (response.ok && data.status === 'ok') {
+            resetPoints();
+            showNotification('♻️ Server calibration matrix reset to identity.', 'success');
+          } else {
+            showNotification(`❌ Error resetting calibration: ${data.message || 'Server error'}`, 'error');
+          }
+        } catch (err) {
+          showNotification('❌ Network error while resetting calibration matrix.', 'error');
         }
       }
 
@@ -1020,6 +1038,7 @@
       window.resetPoints = resetPoints;
       window.undoPoint = undoPoint;
       window.saveCalibration = saveCalibration;
+      window.resetServerCalibration = resetServerCalibration;
       window.closeNotification = closeNotification;
 
       // Initial snapshot fetch on DOM load

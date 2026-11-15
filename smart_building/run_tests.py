@@ -195,14 +195,28 @@ def main():
     if markers:
         pytest_args.extend(["-m", " and ".join(markers)])
 
+    matrix_path = os.path.join(PROJECT_ROOT, "perspective_matrix.npy")
+    matrix_backup = None
+    if os.path.exists(matrix_path):
+        try:
+            with open(matrix_path, "rb") as f:
+                matrix_backup = f.read()
+        except Exception:
+            matrix_backup = None
+
     plugin = JsonReportPlugin(output_path=args.json_output)
     exit_code = pytest.main(pytest_args, plugins=[plugin])
 
     print_summary(exit_code, plugin)
 
-    # Clean up perspective_matrix.npy if created during test run
-    matrix_path = os.path.join(PROJECT_ROOT, "perspective_matrix.npy")
-    if os.path.exists(matrix_path):
+    # Restore pre-existing calibration matrix or remove test-generated artifact
+    if matrix_backup is not None:
+        try:
+            with open(matrix_path, "wb") as f:
+                f.write(matrix_backup)
+        except Exception:
+            pass
+    elif os.path.exists(matrix_path):
         try:
             os.remove(matrix_path)
         except Exception:

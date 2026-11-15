@@ -6,6 +6,7 @@ Handles MJPEG decoding, auto-reconnection, and simulation fallbacks (webcam, vid
 import os
 import math
 import time
+import ipaddress
 import logging
 import threading
 from typing import Tuple, Optional
@@ -37,19 +38,23 @@ class VisionStream:
         reconnect_interval: float = 2.0,
         webcam_index: int = 0,
         video_path: Optional[str] = None,
+        reprobe_interval: Optional[float] = None,
     ) -> None:
         if config is not None:
-            default_url = getattr(config, "ESP32_STREAM_URL", "http://192.168.137.31:81/stream")
+            default_url = getattr(config, "ESP32_STREAM_URL", "http://172.20.10.2:81/stream")
             default_sim = getattr(config, "IS_SIMULATION", False)
+            default_reprobe = getattr(config, "ESP32_REPROBE_INTERVAL", 5.0)
         else:
-            default_url = "http://192.168.137.31:81/stream"
+            default_url = "http://172.20.10.2:81/stream"
             default_sim = False
+            default_reprobe = 5.0
 
         self.stream_url = stream_url if stream_url is not None else default_url
         self.is_simulation = is_simulation if is_simulation is not None else default_sim
         self.reconnect_interval = reconnect_interval
         self.webcam_index = webcam_index
         self.video_path = video_path
+        self.reprobe_interval = float(reprobe_interval if reprobe_interval is not None else default_reprobe)
 
         self.cap: Optional[cv2.VideoCapture] = None
         self.active_source_type: str = "none"
@@ -116,20 +121,36 @@ class VisionStream:
     def _discover_camera_ip(self, timeout: float = 3.0) -> Optional[str]:
         """Listens for UDP broadcasts from the ESP32 to automatically discover its IP."""
         logger.info("Starting UDP Auto-Discovery for ESP32 camera...")
+        sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             # Bind to all interfaces on port 12345
             sock.bind(("0.0.0.0", 12345))
             sock.settimeout(timeout)
-            
+
             # Wait for broadcast packet
             data, addr = sock.recvfrom(1024)
-            msg = data.decode('utf-8').strip()
-            
+            msg = data.decode('utf-8', errors='ignore').strip()
+
             if msg.startswith("ECOZONE_CAM:"):
-                ip = msg.split(":")[1]
-                url = f"http://{ip}:81/stream"
+                raw_ip = msg.split(":", 1)[1].strip()
+                try:
+                    ip_obj = ipaddress.ip_address(raw_ip)
+                except ValueError:
+                    logger.warning("Rejected malformed UDP camera IP '%s' from %s", raw_ip, addr)
+                    return None
+
+                sender_ip = addr[0] if addr else ""
+                if sender_ip not in ("127.0.0.1", "::1", "") and str(ip_obj) != sender_ip:
+                    logger.warning(
+                        "Rejected mismatched UDP camera announcement '%s' from sender '%s'",
+                        ip_obj,
+                        sender_ip,
+                    )
+                    return None
+
+                url = f"http://{ip_obj}:81/stream"
                 logger.info("Auto-Discovery SUCCESS! Camera found at %s", url)
                 return url
         except socket.timeout:
@@ -137,29 +158,43 @@ class VisionStream:
         except Exception as e:
             logger.warning("UDP Auto-Discovery error: %s", e)
         finally:
-            sock.close()
-            
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+
         return None
+
+    def _try_open_esp32(self, discovery_timeout: float = 3.0) -> Tuple[Optional[cv2.VideoCapture], Optional[np.ndarray]]:
+        """Attempt UDP discovery and open ESP32 MJPEG stream, verifying first frame."""
+        discovered_url = self._discover_camera_ip(timeout=discovery_timeout)
+        if discovered_url:
+            self.stream_url = discovered_url
+
+        logger.info("Attempting ESP32 MJPEG stream connection: %s", self.stream_url)
+        cap = cv2.VideoCapture(self.stream_url)
+        if cap.isOpened():
+            ret, frame = cap.read()
+            if ret and frame is not None and frame.size > 0:
+                return cap, frame
+        try:
+            cap.release()
+        except Exception:
+            pass
+        return None, None
 
     def _init_source(self) -> bool:
         self._release_cap()
 
         if not self.is_simulation:
-            # Attempt UDP Auto-Discovery before using config URL
-            discovered_url = self._discover_camera_ip()
-            if discovered_url:
-                self.stream_url = discovered_url
-                
-            logger.info("Attempting ESP32 MJPEG stream connection: %s", self.stream_url)
-            self.cap = cv2.VideoCapture(self.stream_url)
-            if self.cap.isOpened():
-                ret, frame = self.cap.read()
-                if ret and frame is not None and frame.size > 0:
-                    self.active_source_type = "esp32"
-                    logger.info("Successfully connected to ESP32 stream.")
-                    return True
+            cap_esp32, _ = self._try_open_esp32(discovery_timeout=3.0)
+            if cap_esp32 is not None:
+                self.cap = cap_esp32
+                self.active_source_type = "esp32"
+                logger.info("Successfully connected to ESP32 stream.")
+                return True
             logger.warning("Failed to open ESP32 stream at %s", self.stream_url)
-            self._release_cap()
 
             force_esp32 = os.getenv("FORCE_ESP32_ONLY", "0").lower() in ("1", "true", "yes")
             if force_esp32:
@@ -197,11 +232,32 @@ class VisionStream:
 
     def _capture_loop(self) -> None:
         consecutive_failures = 0
+        last_reprobe_time = time.monotonic()
 
         while self._running:
             if self.active_source_type == "none" or (self.cap is None and self.active_source_type != "synthetic"):
                 if not self._init_source():
                     time.sleep(self.reconnect_interval)
+                    continue
+                last_reprobe_time = time.monotonic()
+
+            # Self-healing periodic probe: recover primary ESP32 stream if currently on fallback
+            if (
+                not self.is_simulation
+                and self.active_source_type in ("synthetic", "webcam", "video")
+                and (time.monotonic() - last_reprobe_time) >= self.reprobe_interval
+            ):
+                last_reprobe_time = time.monotonic()
+                cap_esp32, probed_frame = self._try_open_esp32(discovery_timeout=1.0)
+                if cap_esp32 is not None and probed_frame is not None:
+                    self._release_cap()
+                    self.cap = cap_esp32
+                    self.active_source_type = "esp32"
+                    consecutive_failures = 0
+                    logger.info("Recovered primary ESP32 stream from '%s' fallback!", self.stream_url)
+                    with self._lock:
+                        self._latest_frame = probed_frame
+                        self._latest_ret = True
                     continue
 
             if self.active_source_type == "synthetic":
@@ -229,26 +285,30 @@ class VisionStream:
                 else:
                     consecutive_failures = 0
 
+                flip_env = os.getenv("CAMERA_FLIP", "").strip()
+                if flip_env in ("-1", "0", "1"):
+                    frame = cv2.flip(frame, int(flip_env))
+
             with self._lock:
                 self._latest_frame = frame
                 self._latest_ret = ret
 
     def _generate_synthetic_frame(self) -> np.ndarray:
-        """Generates a 640x480 synthetic frame with grid lines and a moving person target."""
+        """Generates a 640x480 synthetic frame with 3x2 grid lines matching the warped canvas and a moving target."""
         width, height = 640, 480
         frame = np.zeros((height, width, 3), dtype=np.uint8)
         frame[:] = (46, 26, 26)  # Dark purple-blue background
 
-        # Draw simulated zone grid lines (3 rows x 2 cols)
-        cv2.line(frame, (int(width / 2.0), 0), (int(width / 2.0), height), (80, 80, 80), 1)
-        for r in range(1, 3):
-            y = int(r * (height / 3.0))
-            cv2.line(frame, (0, y), (width, y), (80, 80, 80), 1)
+        # Draw simulated zone grid lines aligned with 600x400 canvas (x=300; y=133, 266)
+        cv2.line(frame, (300, 0), (300, 400), (80, 80, 80), 1)
+        cv2.line(frame, (0, 133), (600, 133), (80, 80, 80), 1)
+        cv2.line(frame, (0, 266), (600, 266), (80, 80, 80), 1)
+        cv2.rectangle(frame, (0, 0), (599, 399), (100, 100, 100), 1)
 
-        # Calculate moving synthetic person position
+        # Calculate moving synthetic person position covering all 6 zones across steps
         self._sim_step += 1
-        cx = int(320 + 200 * math.sin(self._sim_step * 0.05))
-        cy = int(240 + 120 * math.cos(self._sim_step * 0.05))
+        cx = int(300 + 180 * math.sin(self._sim_step * 0.05))
+        cy = int(180 + 135 * math.cos(self._sim_step * 0.03))
 
         # Draw synthetic person (head + body) in green (BGR: 0, 255, 0)
         cv2.circle(frame, (cx, cy - 30), 15, (0, 255, 0), -1)  # Green head
@@ -261,7 +321,7 @@ class VisionStream:
         # Text overlay
         cv2.putText(frame, "SIMULATION MODE - SYNTHETIC STREAM", (20, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-        cv2.putText(frame, f"Step: {self._sim_step}", (20, 450),
+        cv2.putText(frame, f"Step: {self._sim_step}", (20, 360),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
         return frame

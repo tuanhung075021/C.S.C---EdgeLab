@@ -5,10 +5,15 @@ Unit test suite for Milestone 3 Hardware & Sensor Controller.
 
 import io
 import os
+import sys
 import time
 import py_compile
 import unittest
 from unittest.mock import MagicMock, PropertyMock, patch
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from hardware import GPIOController, calculate_fan_duty, DHTSensor
 

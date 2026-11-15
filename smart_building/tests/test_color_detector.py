@@ -3,10 +3,16 @@ Unit and Integration Tests for ColorDetector Module (Milestone 2)
 EcoZone AI Smart Energy Management System
 """
 
+import os
+import sys
 import threading
 import numpy as np
 import cv2
 import pytest
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from core import ColorDetector
 from core.transform import PerspectiveTransformer, get_zone_id

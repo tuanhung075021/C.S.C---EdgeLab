@@ -24,9 +24,9 @@ try:
     import config
     IS_SIMULATION = getattr(config, 'IS_SIMULATION', True)
     DHT_PIN = getattr(config, 'DHT_PIN', 4)
-    ESP32_STREAM_URL = getattr(config, 'ESP32_STREAM_URL', "http://192.168.137.31:81/stream")
+    ESP32_STREAM_URL = getattr(config, 'ESP32_STREAM_URL', "http://172.20.10.2:81/stream")
     MODEL_XML = getattr(config, 'MODEL_XML', "models/yolov8n_openvino_model/yolov8n.xml")
-    CONFIDENCE_THRESHOLD = getattr(config, 'CONFIDENCE_THRESHOLD', 0.5)
+    CONFIDENCE_THRESHOLD = getattr(config, 'CONFIDENCE_THRESHOLD', 0.35)
     WARP_WIDTH = getattr(config, 'WARP_WIDTH', 600)
     WARP_HEIGHT = getattr(config, 'WARP_HEIGHT', 400)
     GRID_ROWS = getattr(config, 'GRID_ROWS', 3)
@@ -34,13 +34,17 @@ try:
     CELL_WIDTH = getattr(config, 'CELL_WIDTH', 300)
     CELL_HEIGHT = getattr(config, 'CELL_HEIGHT', 133)
     PERSPECTIVE_MATRIX_PATH = getattr(config, 'PERSPECTIVE_MATRIX_PATH', "perspective_matrix.npy")
+    ZONE_HOLD_SECONDS = getattr(config, 'ZONE_HOLD_SECONDS', 3.0)
+    SYNTHETIC_HARDWARE_LOCKOUT = getattr(config, 'SYNTHETIC_HARDWARE_LOCKOUT', True)
+    ZONE_LIGHT_WATTS = getattr(config, 'ZONE_LIGHT_WATTS', 10.0)
+    FAN_MAX_WATTS = getattr(config, 'FAN_MAX_WATTS', 5.0)
 except ImportError:
     config = None
     IS_SIMULATION = True
     DHT_PIN = 4
-    ESP32_STREAM_URL = "http://192.168.137.31:81/stream"
+    ESP32_STREAM_URL = "http://172.20.10.2:81/stream"
     MODEL_XML = "models/yolov8n_openvino_model/yolov8n.xml"
-    CONFIDENCE_THRESHOLD = 0.5
+    CONFIDENCE_THRESHOLD = 0.35
     WARP_WIDTH = 600
     WARP_HEIGHT = 400
     GRID_ROWS = 3
@@ -48,6 +52,10 @@ except ImportError:
     CELL_WIDTH = 300
     CELL_HEIGHT = 133
     PERSPECTIVE_MATRIX_PATH = "perspective_matrix.npy"
+    ZONE_HOLD_SECONDS = 3.0
+    SYNTHETIC_HARDWARE_LOCKOUT = True
+    ZONE_LIGHT_WATTS = 10.0
+    FAN_MAX_WATTS = 5.0
 
 # Module imports
 try:
@@ -98,15 +106,26 @@ latest_telemetry = {
     "timestamp": int(time.time()),
     "zone_activity": [0, 0, 0, 0, 0, 0],
     "mode": current_mode,
+    "power_watts": 0.0,
+    "power_saved_watts": 6 * ZONE_LIGHT_WATTS + FAN_MAX_WATTS,
+    "savings_pct": 100.0,
+    "energy_saved_wh": 0.0,
+    "camera_source": "none",
 }
 
 # Unwarped raw frame buffer for perspective calibration
 raw_frame_lock = threading.Lock()
 latest_raw_frame: Optional[np.ndarray] = None
 
-# Annotated MJPEG frame buffer
+# Annotated MJPEG frame buffer & debug HSV mask buffer
 annotated_frame_lock = threading.Lock()
 latest_annotated_frame: bytes = b''
+debug_frame_lock = threading.Lock()
+latest_debug_frame: bytes = b''
+
+# Zone Occupancy FSM (Hold-time hysteresis to prevent relay chatter)
+zone_hysteresis_lock = threading.Lock()
+zone_last_seen_ts: list[Optional[float]] = [None] * 6
 
 # Detection event log (circular buffer)
 detection_log_lock = threading.Lock()
@@ -142,7 +161,7 @@ class FallbackGPIOController:
     def set_fan(self, temp, total_people):
         if total_people == 0:
             return 0
-        duty = min(100, max(0, int(40 + (temp - 25) * 5 + total_people * 10)))
+        duty = min(100, max(0, int(round(40 + (temp - 25) * 5 + total_people * 10))))
         return duty
 
     def cleanup(self):
@@ -274,9 +293,11 @@ def annotate_frame(frame, occupied_zones, total_people, fan_speed, temp):
         color = (20, 200, 120) if is_occ else (80, 80, 100)
         alpha = 0.28 if is_occ else 0.08
 
-        overlay = out.copy()
-        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
-        cv2.addWeighted(overlay, alpha, out, 1 - alpha, 0, out)
+        if y2 > y1 and x2 > x1:
+            roi = out[y1:y2, x1:x2]
+            color_patch = np.empty_like(roi)
+            color_patch[:] = color
+            cv2.addWeighted(color_patch, alpha, roi, 1.0 - alpha, 0.0, roi)
         cv2.rectangle(out, (x1, y1), (x2, y2), color, 1)
 
         # Zone ID label (Z0 to Z5)
@@ -308,22 +329,68 @@ def annotate_frame(frame, occupied_zones, total_people, fan_speed, temp):
     return out
 
 
+def apply_zone_hysteresis(
+    raw_zones: list[int],
+    now: Optional[float] = None,
+    hold_seconds: Optional[float] = None,
+) -> list[int]:
+    """
+    Temporal occupancy FSM with turn-off grace period (hold-time hysteresis).
+    Turns ON immediately upon detection; waits hold_seconds before turning OFF to prevent
+    mechanical relay chatter from transient occlusions or borderline confidence jitter.
+    """
+    t_now = time.monotonic() if now is None else float(now)
+    hold = ZONE_HOLD_SECONDS if hold_seconds is None else float(hold_seconds)
+    stabilized = [0] * 6
+
+    with zone_hysteresis_lock:
+        for i in range(6):
+            is_detected = bool(raw_zones[i]) if i < len(raw_zones) else False
+            if is_detected:
+                zone_last_seen_ts[i] = t_now
+                stabilized[i] = 1
+            elif (
+                hold > 0.0
+                and zone_last_seen_ts[i] is not None
+                and (t_now - zone_last_seen_ts[i]) < hold
+            ):
+                stabilized[i] = 1
+            else:
+                stabilized[i] = 0
+
+    return stabilized
+
+
+def reset_zone_hysteresis() -> None:
+    """Clears hold-time timestamps so zones turn OFF immediately on lockout or context change."""
+    with zone_hysteresis_lock:
+        for i in range(6):
+            zone_last_seen_ts[i] = None
+
+
 # ---------------------------------------------------------------------------
 # Background worker
 # ---------------------------------------------------------------------------
 def background_pipeline_worker():
     """Continuous background processing loop: Vision -> Raw Buffer -> Transform -> Detector -> GPIO -> Telemetry."""
-    global latest_telemetry, is_running, latest_annotated_frame, latest_raw_frame, detection_log, zone_activity
-    global current_mode, ai_detector_instance, color_detector_instance
+    global latest_telemetry, is_running, latest_annotated_frame, latest_raw_frame, latest_debug_frame
+    global detection_log, zone_activity, current_mode, ai_detector_instance, color_detector_instance
 
     gpio_ctrl, dht_sensor, vision_stream, transformer, detector = initialize_pipeline_components()
     logger.info("Background pipeline worker thread started")
 
+    energy_saved_wh = 0.0
+    last_energy_ts = time.monotonic()
+    baseline_watts = 6.0 * float(ZONE_LIGHT_WATTS) + float(FAN_MAX_WATTS)
+    target_period = 0.1
+
     while is_running:
+        loop_start = time.monotonic()
         try:
-            occupied_zones = [0, 0, 0, 0, 0, 0]
+            raw_occupied_zones = [0, 0, 0, 0, 0, 0]
             total_people = 0
             warped_frame = None
+            source_type = "none"
 
             # Read active mode under lock
             with mode_lock:
@@ -331,6 +398,7 @@ def background_pipeline_worker():
 
             # Vision pipeline
             if vision_stream is not None:
+                source_type = vision_stream.get_source_type()
                 ret, frame = vision_stream.read_frame()
                 if ret and frame is not None and frame.size > 0:
                     # Update thread-safe unwarped frame buffer before transform
@@ -344,59 +412,96 @@ def background_pipeline_worker():
 
                     # Branch based on active detection mode
                     if active_mode == "color" and color_detector_instance is not None:
-                        occupied_zones, total_people = color_detector_instance.detect(warped_frame)
+                        raw_occupied_zones, total_people = color_detector_instance.detect(warped_frame)
                     elif active_mode == "ai" and ai_detector_instance is not None:
-                        occupied_zones, total_people = ai_detector_instance.detect(frame, transformer=transformer)
+                        raw_occupied_zones, total_people = ai_detector_instance.detect(
+                            frame,
+                            transformer=transformer,
+                            force_mock=(source_type == "synthetic" and IS_SIMULATION),
+                        )
+
+            # Synthetic hardware lockout: never hold or toggle real relays from synthetic fallback frames
+            lockout_active = (
+                not IS_SIMULATION
+                and SYNTHETIC_HARDWARE_LOCKOUT
+                and source_type == "synthetic"
+            )
+            if lockout_active:
+                reset_zone_hysteresis()
+                occupied_zones = [0, 0, 0, 0, 0, 0]
+                hw_zones = [0, 0, 0, 0, 0, 0]
+                hw_people = 0
+            else:
+                # Stabilize zones with hold-time hysteresis
+                occupied_zones = apply_zone_hysteresis(raw_occupied_zones, now=loop_start)
+                hw_zones = occupied_zones
+                hw_people = max(int(total_people), sum(occupied_zones))
 
             # Read sensors
             temp, humidity = dht_sensor.read() if dht_sensor is not None else (28.0, 65.0)
 
             # Control hardware
-            fan_speed = gpio_ctrl.set_fan(temp, total_people) if gpio_ctrl is not None else 0
+            fan_speed = gpio_ctrl.set_fan(temp, hw_people) if gpio_ctrl is not None else 0
             if gpio_ctrl is not None:
-                gpio_ctrl.update_zones(occupied_zones)
+                gpio_ctrl.update_zones(hw_zones)
 
-            # Update zone activity counters + detection log
-            with detection_log_lock:
-                for i, occ in enumerate(occupied_zones):
-                    if occ:
-                        zone_activity[i] += 1
-                if total_people > 0:
-                    occ_names = [f"Z{i}" for i, v in enumerate(occupied_zones) if v]
-                    detection_log.append({
-                        "ts": time.strftime("%H:%M:%S"),
-                        "people": total_people,
-                        "zones": occ_names,
-                        "fan": fan_speed,
-                        "temp": round(temp, 1),
-                    })
-                    if len(detection_log) > MAX_LOG_ENTRIES:
-                        detection_log.pop(0)
+            # Energy & Carbon savings calculation
+            now_mono = time.monotonic()
+            dt = max(0.0, min(5.0, now_mono - last_energy_ts))
+            last_energy_ts = now_mono
+            actual_watts = sum(hw_zones) * float(ZONE_LIGHT_WATTS) + (float(fan_speed) / 100.0) * float(FAN_MAX_WATTS)
+            saved_watts = max(0.0, baseline_watts - actual_watts)
+            savings_pct = (saved_watts / baseline_watts * 100.0) if baseline_watts > 0.0 else 0.0
+            energy_saved_wh += saved_watts * (dt / 3600.0)
 
-            # Build annotated MJPEG frame
+            # Update zone activity counters + detection log (skip when synthetic hardware lockout is active)
+            if not lockout_active:
+                with detection_log_lock:
+                    for i, occ in enumerate(occupied_zones):
+                        if occ:
+                            zone_activity[i] += 1
+                    if hw_people > 0:
+                        occ_names = [f"Z{i}" for i, v in enumerate(occupied_zones) if v]
+                        detection_log.append({
+                            "ts": time.strftime("%H:%M:%S"),
+                            "people": hw_people,
+                            "zones": occ_names,
+                            "fan": fan_speed,
+                            "temp": round(temp, 1),
+                        })
+                        if len(detection_log) > MAX_LOG_ENTRIES:
+                            detection_log.pop(0)
+
+            # Build annotated MJPEG frame (HSV debug mask is encoded on-demand in /debug_feed)
             if warped_frame is not None:
-                annotated = annotate_frame(warped_frame, occupied_zones, total_people, fan_speed, temp)
-                _, jpeg = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 92])
+                annotated = annotate_frame(warped_frame, occupied_zones, hw_people, fan_speed, temp)
+                _, jpeg = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
                 with annotated_frame_lock:
                     latest_annotated_frame = jpeg.tobytes()
 
-            # Update shared telemetry with active mode
+            # Update shared telemetry with active mode & energy KPIs
             with telemetry_lock:
                 latest_telemetry = {
-                    "zones": [int(z) for z in occupied_zones],
+                    "zones": [int(z) for z in hw_zones],
                     "temp": float(temp),
                     "humidity": float(humidity),
                     "fan_speed": int(fan_speed),
-                    "total_people": int(total_people),
+                    "total_people": int(hw_people),
                     "timestamp": int(time.time()),
                     "zone_activity": list(zone_activity),
                     "mode": active_mode,
+                    "power_watts": round(actual_watts, 1),
+                    "power_saved_watts": round(saved_watts, 1),
+                    "savings_pct": round(savings_pct, 1),
+                    "energy_saved_wh": round(energy_saved_wh, 4),
+                    "camera_source": source_type,
                 }
 
         except Exception as e:
             logger.error(f"Error in background pipeline worker loop: {e}")
 
-        time.sleep(0.1)
+        elapsed = time.monotonic() - loop_start
+        time.sleep(max(0.005, target_period - elapsed))
 
     logger.info("Background pipeline worker thread stopped")
 
@@ -512,7 +617,25 @@ def calibrate_save():
         else:
             scale_x, scale_y = 1.0, 1.0
 
-        src_points = np.float32([[pt[0] * scale_x, pt[1] * scale_y] for pt in parsed_points])
+        with np.errstate(over="ignore", invalid="ignore"):
+            src_points = np.float32([[pt[0] * scale_x, pt[1] * scale_y] for pt in parsed_points])
+
+        # Validate finite coordinates, convexity, clockwise order, and minimum area
+        if not np.all(np.isfinite(src_points)):
+            return jsonify({
+                "status": "error",
+                "message": "Corner coordinates must be finite numbers"
+            }), 400
+        if not cv2.isContourConvex(src_points.reshape(-1, 1, 2)):
+            return jsonify({
+                "status": "error",
+                "message": "Corners must form a convex quadrilateral in clockwise order (TL -> TR -> BR -> BL)"
+            }), 400
+        if cv2.contourArea(src_points, oriented=True) < 100.0:
+            return jsonify({
+                "status": "error",
+                "message": "Corners must be clicked in clockwise order (TL -> TR -> BR -> BL) with area >= 100 px^2"
+            }), 400
 
         # Destination points for 600x400 Bird's-Eye perspective view: TL, TR, BR, BL
         dst_points = np.float32([
@@ -534,10 +657,11 @@ def calibrate_save():
         np.save(PERSPECTIVE_MATRIX_PATH, M)
         logger.info("Saved new perspective matrix to %s (shape: %s)", PERSPECTIVE_MATRIX_PATH, M.shape)
 
-        # Dynamically update running transformer in-memory
+        # Dynamically update running transformer in-memory and reset hysteresis memory
         if transformer_instance is not None:
             transformer_instance.matrix = M
             logger.info("Updated live transformer instance with new perspective matrix")
+        reset_zone_hysteresis()
 
         return jsonify({
             "status": "ok",
@@ -598,11 +722,110 @@ def video_feed():
                     headers={'Cache-Control': 'no-cache'})
 
 
+@app.route('/calibrate/reset', methods=['POST'])
+def calibrate_reset():
+    """Resets the active perspective transform to identity matrix and removes saved .npy file."""
+    try:
+        identity = np.eye(3, dtype=np.float32)
+        if transformer_instance is not None:
+            transformer_instance.matrix = identity
+        if os.path.exists(PERSPECTIVE_MATRIX_PATH):
+            os.remove(PERSPECTIVE_MATRIX_PATH)
+        reset_zone_hysteresis()
+        logger.info("Calibration reset to identity matrix")
+        return jsonify({"status": "ok", "message": "Calibration reset to identity matrix"}), 200
+    except Exception as e:
+        logger.error(f"Error resetting calibration: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/raw_feed')
+def raw_feed():
+    """MJPEG stream of the unwarped raw camera view."""
+    def generate():
+        ph = np.zeros((480, 640, 3), dtype=np.uint8)
+        cv2.putText(ph, 'Waiting for raw camera frame...', (110, 240),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (120, 140, 180), 2)
+        _, enc = cv2.imencode('.jpg', ph)
+        placeholder = enc.tobytes()
+
+        while is_running:
+            frame_copy = None
+            with raw_frame_lock:
+                if latest_raw_frame is not None and latest_raw_frame.size > 0:
+                    frame_copy = latest_raw_frame.copy()
+            if frame_copy is not None:
+                ok, enc_frame = cv2.imencode('.jpg', frame_copy, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                chosen = enc_frame.tobytes() if ok else placeholder
+            else:
+                chosen = placeholder
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + chosen + b'\r\n')
+            time.sleep(0.1)
+
+    return Response(generate(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame',
+                    headers={'Cache-Control': 'no-cache'})
+
+
+@app.route('/debug_feed')
+def debug_feed():
+    """MJPEG stream of the HSV binary mask computed/encoded on-demand for calibration."""
+    def generate():
+        ph = np.zeros((WARP_HEIGHT, WARP_WIDTH, 3), dtype=np.uint8)
+        cv2.putText(ph, 'Waiting for HSV debug mask...', (110, 200),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (120, 140, 180), 2)
+        _, enc = cv2.imencode('.jpg', ph)
+        placeholder = enc.tobytes()
+
+        while is_running:
+            mask = None
+            if color_detector_instance is not None:
+                with mode_lock:
+                    active_mode_now = current_mode
+                if active_mode_now == "color":
+                    mask = color_detector_instance.get_last_mask()
+                if mask is None:
+                    raw_copy = None
+                    with raw_frame_lock:
+                        if latest_raw_frame is not None and latest_raw_frame.size > 0:
+                            raw_copy = latest_raw_frame.copy()
+                    if raw_copy is not None:
+                        if transformer_instance is not None:
+                            warped = transformer_instance.warp(raw_copy)
+                        else:
+                            warped = cv2.resize(raw_copy, (WARP_WIDTH, WARP_HEIGHT))
+                        mask = color_detector_instance.get_mask(warped)
+
+            if mask is not None and mask.size > 0:
+                mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+                ok, mask_jpeg = cv2.imencode('.jpg', mask_bgr, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                chosen = mask_jpeg.tobytes() if ok else placeholder
+            else:
+                chosen = placeholder
+
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + chosen + b'\r\n')
+            time.sleep(0.1)
+
+    return Response(generate(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame',
+                    headers={'Cache-Control': 'no-cache'})
+
+
 @app.route('/detection_log')
 def get_detection_log():
     """Returns the last 20 detection events + per-zone activity counts as JSON."""
     with detection_log_lock:
         return jsonify({'log': list(detection_log[-20:]), 'zone_activity': list(zone_activity)})
+
+
+@app.route('/detection_log/clear', methods=['POST'])
+def clear_detection_log():
+    """Clears the server-side detection event log buffer."""
+    with detection_log_lock:
+        detection_log.clear()
+    return jsonify({'status': 'ok'}), 200
 
 
 @app.route('/set_mode', methods=['POST'])
@@ -628,6 +851,7 @@ def set_mode():
 
         with mode_lock:
             current_mode = mode_clean
+        reset_zone_hysteresis()
 
         logger.info(f"Detection mode updated to '{current_mode}'")
         return jsonify({"status": "ok", "mode": current_mode}), 200
