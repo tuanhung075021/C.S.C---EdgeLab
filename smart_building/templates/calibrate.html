@@ -205,13 +205,15 @@
 
     #calibrationCanvas {
       display: block;
-      width: 100%;
+      max-width: 100%;
+      max-height: 65vh;
+      width: auto;
       height: auto;
-      max-height: 68vh;
-      object-fit: contain;
+      margin: 0 auto;
       touch-action: none;
       user-select: none;
       -webkit-user-select: none;
+      cursor: crosshair;
     }
 
     .canvas-overlay {
@@ -683,6 +685,9 @@
               <button id="btn-reset" class="btn-action" onclick="resetPoints()">
                 🔄 Reset Points
               </button>
+              <button id="btn-auto-order" class="btn-action" onclick="autoOrderCorners()" title="Tự động sắp xếp 4 góc theo đúng chuẩn chiều kim đồng hồ">
+                ✨ Auto-Align (TL→TR→BR→BL)
+              </button>
             </div>
             <span class="keyboard-hint">
               Shortcuts: <kbd>R</kbd> Reset &nbsp; <kbd>U</kbd> Undo &nbsp; <kbd>S</kbd> Save
@@ -1054,6 +1059,44 @@
           ctx.textBaseline = 'middle';
           ctx.fillText(badgeText, badgeX + 8, badgeY + badgeHeight / 2);
         });
+
+        // 4. Live Cursor Crosshair & Coordinates on Hover
+        if (hoverCoords && points.length < 4) {
+          const hx = hoverCoords.x;
+          const hy = hoverCoords.y;
+
+          // Crosshair dashed guide lines
+          ctx.beginPath();
+          ctx.setLineDash([4, 4]);
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
+          ctx.lineWidth = 1;
+          ctx.moveTo(hx, 0);
+          ctx.lineTo(hx, canvas.height);
+          ctx.moveTo(0, hy);
+          ctx.lineTo(canvas.width, hy);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Center crosshair ring
+          ctx.beginPath();
+          ctx.arc(hx, hy, 7, 0, Math.PI * 2);
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // Live coordinate pill
+          const coordText = `(${hx}, ${hy})`;
+          ctx.font = '600 11px "JetBrains Mono", monospace';
+          const tw = ctx.measureText(coordText).width + 12;
+          const px = (hx + tw + 10 > canvas.width) ? hx - tw - 10 : hx + 10;
+          const py = (hy - 24 < 0) ? hy + 24 : hy - 12;
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 1;
+          roundRect(ctx, px, py - 14, tw, 20, 4, true, true);
+          ctx.fillStyle = '#38bdf8';
+          ctx.fillText(coordText, px + 6, py);
+        }
       }
 
       // Helper to draw rounded rectangle on canvas
@@ -1151,6 +1194,7 @@
           rawImage = img;
           canvas.width = img.naturalWidth || 640;
           canvas.height = img.naturalHeight || 480;
+          canvas.style.aspectRatio = `${canvas.width} / ${canvas.height}`;
 
           resolutionPill.textContent = `Res: ${canvas.width}×${canvas.height}`;
           timePill.textContent = `Snapshot: ${new Date().toLocaleTimeString()}`;
@@ -1183,10 +1227,77 @@
         }
       }
 
+      function autoOrderCorners() {
+        if (points.length !== 4) {
+          showNotification('Cần chọn đủ 4 góc trước khi tự động sắp xếp.', 'error');
+          return false;
+        }
+
+        const rawPts = points.map(p => ({ x: p.x, y: p.y }));
+        const cx = rawPts.reduce((acc, p) => acc + p.x, 0) / 4.0;
+        const cy = rawPts.reduce((acc, p) => acc + p.y, 0) / 4.0;
+
+        const topPts = rawPts.filter(p => p.y <= cy);
+        const botPts = rawPts.filter(p => p.y > cy);
+
+        let tl, tr, br, bl;
+        if (topPts.length === 2 && botPts.length === 2) {
+          topPts.sort((a, b) => a.x - b.x);
+          botPts.sort((a, b) => b.x - a.x);
+          tl = topPts[0];
+          tr = topPts[1];
+          br = botPts[0];
+          bl = botPts[1];
+        } else {
+          rawPts.sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx));
+          let minIdx = 0;
+          let minSum = rawPts[0].x + rawPts[0].y;
+          for (let i = 1; i < 4; i++) {
+            const sum = rawPts[i].x + rawPts[i].y;
+            if (sum < minSum) {
+              minSum = sum;
+              minIdx = i;
+            }
+          }
+          tl = rawPts[minIdx];
+          tr = rawPts[(minIdx + 1) % 4];
+          br = rawPts[(minIdx + 2) % 4];
+          bl = rawPts[(minIdx + 3) % 4];
+        }
+
+        const sortedCoords = [tl, tr, br, bl];
+        points = sortedCoords.map((coord, idx) => {
+          const def = POINT_DEFINITIONS[idx];
+          return {
+            x: coord.x,
+            y: coord.y,
+            label: def.label,
+            name: def.name,
+            color: def.color
+          };
+        });
+
+        syncUI();
+        return true;
+      }
+
       async function saveCalibration() {
         if (points.length !== 4) {
           showNotification('Please place all 4 corner points before saving.', 'error');
           return;
+        }
+
+        // Check if points are counter-clockwise (signedArea <= 0 in screen coordinates)
+        let signedArea = 0;
+        for (let i = 0; i < points.length; i++) {
+          const j = (i + 1) % points.length;
+          signedArea += points[i].x * points[j].y;
+          signedArea -= points[j].x * points[i].y;
+        }
+
+        if (signedArea <= 0) {
+          autoOrderCorners();
+          showNotification('🔄 Đã tự động chuẩn hóa 4 góc theo chiều kim đồng hồ (TL → TR → BR → BL)!', 'success');
         }
 
         isSaving = true;
@@ -1266,6 +1377,18 @@
       }
 
       // --- Attach Global Event Listeners ---
+      let hoverCoords = null;
+      canvas.addEventListener('pointermove', function(e) {
+        if (points.length < 4) {
+          hoverCoords = getCanvasCoordinates(e);
+          renderCanvas();
+        }
+      });
+      canvas.addEventListener('pointerleave', function() {
+        hoverCoords = null;
+        renderCanvas();
+      });
+
       canvas.addEventListener('pointerdown', handleCanvasInteraction);
       window.addEventListener('keydown', handleKeyDown);
 
@@ -1273,6 +1396,7 @@
       window.loadSnapshot = loadSnapshot;
       window.resetPoints = resetPoints;
       window.undoPoint = undoPoint;
+      window.autoOrderCorners = autoOrderCorners;
       window.saveCalibration = saveCalibration;
       window.resetServerCalibration = resetServerCalibration;
       window.closeNotification = closeNotification;
