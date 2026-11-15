@@ -52,7 +52,7 @@
 // Camera Performance & Frame Config
 // ==========================================
 #define CAM_FRAMESIZE    FRAMESIZE_VGA  // 640x480 resolution
-#define CAM_JPEG_QUALITY 12             // Quality: lower=better (0-63). 12=good balance of quality & speed
+#define CAM_JPEG_QUALITY 12             // Quality: lower=better (0-63). 12=good balance of quality & speed (applied via s->set_quality after UXGA buffer init)
 #define CAM_FB_COUNT     2              // Double buffering with PSRAM
 
 #endif // CONFIG_H

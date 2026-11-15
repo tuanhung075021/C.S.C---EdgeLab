@@ -39,7 +39,7 @@ IS_SIMULATION: bool = detect_simulation_mode()
 
 # ESP32 MJPEG Camera Stream
 ESP32_STREAM_URL: str = os.getenv(
-    "ESP32_STREAM_URL", "http://10.40.41.34:81/stream"
+    "ESP32_STREAM_URL", "http://172.20.10.2:81/stream"
 )
 
 # Raspberry Pi BCM GPIO Pin Assignments
