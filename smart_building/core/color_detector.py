@@ -78,7 +78,7 @@ class ColorDetector:
         self._glare_halo_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
         self._last_mask = None
 
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         logger.info(
             "ColorDetector initialized with HSV [%s - %s], min_area=%.1f, kernel=%s",
             self.lower_hsv.tolist(),
@@ -86,6 +86,40 @@ class ColorDetector:
             self.min_contour_area,
             self.morph_kernel_size,
         )
+
+    def update_config(
+        self,
+        lower_hsv: Optional[Union[np.ndarray, Sequence[int]]] = None,
+        upper_hsv: Optional[Union[np.ndarray, Sequence[int]]] = None,
+        min_contour_area: Optional[float] = None,
+        enable_glare_recovery: Optional[bool] = None,
+    ) -> dict:
+        """Dynamically update HSV bounds, minimum contour area, and glare recovery setting."""
+        with self._lock:
+            if lower_hsv is not None:
+                self.lower_hsv = np.array(lower_hsv, dtype=np.uint8)
+            if upper_hsv is not None:
+                self.upper_hsv = np.array(upper_hsv, dtype=np.uint8)
+            if min_contour_area is not None:
+                self.min_contour_area = max(10.0, float(min_contour_area))
+            if enable_glare_recovery is not None:
+                self.enable_glare_recovery = bool(enable_glare_recovery)
+            return {
+                "lower_hsv": self.lower_hsv.tolist(),
+                "upper_hsv": self.upper_hsv.tolist(),
+                "min_contour_area": float(self.min_contour_area),
+                "enable_glare_recovery": bool(self.enable_glare_recovery),
+            }
+
+    def get_config(self) -> dict:
+        """Return current detector configuration as JSON-serializable dict."""
+        with self._lock:
+            return {
+                "lower_hsv": self.lower_hsv.tolist(),
+                "upper_hsv": self.upper_hsv.tolist(),
+                "min_contour_area": float(self.min_contour_area),
+                "enable_glare_recovery": bool(self.enable_glare_recovery),
+            }
 
     def _compute_mask(self, frame: np.ndarray) -> np.ndarray:
         """

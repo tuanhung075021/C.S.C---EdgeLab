@@ -382,3 +382,30 @@ class TestRound2AIModelAndAlgorithmUpgrades:
         assert np.array_equal(syn[150, 100], np.array([100, 100, 100], dtype=np.uint8))
         assert np.array_equal(syn[250, 100], np.array([100, 100, 100], dtype=np.uint8))
         assert "-rotation_index" in inspect.getsource(calibration.main)
+
+    def test_color_detector_update_config_and_api_endpoints(self):
+        from core.color_detector import ColorDetector
+
+        detector = ColorDetector(lower_hsv=[20, 100, 100], upper_hsv=[35, 255, 255], min_contour_area=500.0)
+        cfg = detector.update_config(lower_hsv=[24, 140, 120], upper_hsv=[35, 255, 255], min_contour_area=600.0, enable_glare_recovery=False)
+        assert cfg["lower_hsv"] == [24, 140, 120]
+        assert cfg["min_contour_area"] == 600.0
+        assert cfg["enable_glare_recovery"] is False
+
+        flask_app.config["TESTING"] = True
+        client = flask_app.test_client()
+
+        with patch.object(app_module, "color_detector_instance", detector):
+            res_get = client.get("/api/color_config")
+            assert res_get.status_code == 200
+            assert res_get.get_json()["status"] == "ok"
+
+            res_post = client.post("/api/color_config", json={
+                "lower_hsv": [25, 140, 120],
+                "upper_hsv": [35, 255, 255],
+                "min_contour_area": 550.0,
+                "enable_glare_recovery": True,
+            })
+            assert res_post.status_code == 200
+            assert res_post.get_json()["status"] == "ok"
+            assert res_post.get_json()["config"]["lower_hsv"] == [25, 140, 120]

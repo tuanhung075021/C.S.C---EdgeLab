@@ -466,6 +466,141 @@
       box-shadow: none;
       transform: none;
     }
+
+    /* HSV Calibrator Styles */
+    .hsv-calibrator-card {
+      background: var(--bg-card, rgba(14, 20, 40, 0.68));
+      backdrop-filter: var(--blur, blur(14px));
+      -webkit-backdrop-filter: var(--blur, blur(14px));
+      border: 1px solid var(--border-glass, rgba(255,255,255,0.07));
+      border-radius: var(--radius-card, 18px);
+      padding: 1.5rem;
+      box-shadow: var(--shadow-card, 0 8px 36px rgba(0,0,0,0.40));
+      display: flex;
+      flex-direction: column;
+      gap: 1.2rem;
+      margin-top: 1rem;
+    }
+    .hsv-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      padding-bottom: 0.8rem;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .hsv-actions-top {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+    .btn-preset {
+      padding: 0.4rem 0.85rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: var(--text-main, #f1f5f9);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-preset:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+    .hsv-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+    @media (max-width: 900px) {
+      .hsv-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .hsv-feeds-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .feed-box {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      background: rgba(0,0,0,0.3);
+      padding: 0.8rem;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .feed-label {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text-muted, #94a3b8);
+    }
+    .live-stream-img {
+      width: 100%;
+      height: auto;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: #000;
+    }
+    .hsv-controls-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
+      background: rgba(0,0,0,0.25);
+      padding: 1.2rem;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .slider-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+    .slider-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.82rem;
+      color: var(--text-main, #f1f5f9);
+    }
+    .slider-val {
+      font-family: var(--text-mono, monospace);
+      font-weight: 700;
+      color: #38bdf8;
+    }
+    .slider-hint {
+      font-size: 0.72rem;
+      color: #94a3b8;
+    }
+    .slider-group input[type=range] {
+      width: 100%;
+      accent-color: #8b5cf6;
+      cursor: pointer;
+    }
+    .toggle-group {
+      padding: 0.5rem 0;
+    }
+    .toggle-label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.82rem;
+      cursor: pointer;
+      color: var(--text-main, #f1f5f9);
+    }
+    .hsv-footer-buttons {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-top: 0.5rem;
+    }
+    .save-status-msg {
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
@@ -652,6 +787,107 @@
       </aside>
 
     </div><!-- /.calibrate-grid -->
+
+    <!-- Real-Time Color Detection Calibrator (HSV & Glare Recovery) -->
+    <section class="hsv-calibrator-card" id="hsv-calibrator-section">
+      <div class="hsv-header">
+        <div class="card-title">
+          <span>🎨 Real-Time HSV Color Filter Calibration</span>
+          <span class="subtitle-badge">Cardboard Rejection & Lighting Tuner</span>
+        </div>
+        <div class="hsv-actions-top">
+          <button type="button" class="btn-preset" onclick="applyColorPreset('lemon_yellow')">🟡 Vàng chanh/Neon (Khử carton)</button>
+          <button type="button" class="btn-preset" onclick="applyColorPreset('standard_yellow')">🟨 Vàng tiêu chuẩn</button>
+          <button type="button" class="btn-preset" onclick="applyColorPreset('green_sim')">🟢 Xanh lá (Mô phỏng)</button>
+        </div>
+      </div>
+
+      <div class="hsv-grid">
+        <!-- Live Video Feeds: Raw Feed & Debug Mask -->
+        <div class="hsv-feeds-panel">
+          <div class="feed-box">
+            <div class="feed-label">Camera Thật (Raw Feed)</div>
+            <img src="/raw_feed" class="live-stream-img" alt="Camera Feed">
+          </div>
+          <div class="feed-box">
+            <div class="feed-label">Mặt nạ nhị phân (HSV Binary Mask /debug_feed)</div>
+            <img src="/debug_feed" class="live-stream-img" id="debug-mask-img" alt="HSV Debug Mask">
+          </div>
+        </div>
+
+        <!-- Sliders & Controls -->
+        <div class="hsv-controls-panel">
+          <div class="slider-group">
+            <div class="slider-header">
+              <label for="slider-h-min">Hue Min (Màu Sắc Min: 0..179):</label>
+              <span id="val-h-min" class="slider-val">24</span>
+            </div>
+            <input type="range" id="slider-h-min" min="0" max="179" value="24" oninput="onColorSliderChange()">
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-header">
+              <label for="slider-h-max">Hue Max (Màu Sắc Max: 0..179):</label>
+              <span id="val-h-max" class="slider-val">35</span>
+            </div>
+            <input type="range" id="slider-h-max" min="0" max="179" value="35" oninput="onColorSliderChange()">
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-header">
+              <label for="slider-s-min">Saturation Min (Độ Bão Hòa Min: 0..255):</label>
+              <span id="val-s-min" class="slider-val">140</span>
+            </div>
+            <input type="range" id="slider-s-min" min="0" max="255" value="140" oninput="onColorSliderChange()">
+            <span class="slider-hint">Kéo cao (&gt;130) để loại bỏ hoàn toàn bìa carton xỉn màu</span>
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-header">
+              <label for="slider-s-max">Saturation Max (0..255):</label>
+              <span id="val-s-max" class="slider-val">255</span>
+            </div>
+            <input type="range" id="slider-s-max" min="0" max="255" value="255" oninput="onColorSliderChange()">
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-header">
+              <label for="slider-v-min">Value Min (Độ Sáng Min: 0..255):</label>
+              <span id="val-v-min" class="slider-val">120</span>
+            </div>
+            <input type="range" id="slider-v-min" min="0" max="255" value="120" oninput="onColorSliderChange()">
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-header">
+              <label for="slider-v-max">Value Max (0..255):</label>
+              <span id="val-v-max" class="slider-val">255</span>
+            </div>
+            <input type="range" id="slider-v-max" min="0" max="255" value="255" oninput="onColorSliderChange()">
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-header">
+              <label for="slider-min-area">Diện tích tối thiểu (Min Area: 50..3000 px²):</label>
+              <span id="val-min-area" class="slider-val">500</span>
+            </div>
+            <input type="range" id="slider-min-area" min="50" max="3000" step="50" value="500" oninput="onColorSliderChange()">
+          </div>
+
+          <div class="toggle-group">
+            <label class="toggle-label" for="chk-glare-recovery">
+              <input type="checkbox" id="chk-glare-recovery" checked onchange="onColorSliderChange()">
+              <span>Khử lóa phản quang LED (Geodesic Glare Recovery)</span>
+            </label>
+          </div>
+
+          <div class="hsv-footer-buttons">
+            <button type="button" class="btn-save-primary" onclick="saveColorConfig(true)">💾 Lưu Cấu Hình Màu Vào Pi</button>
+            <span id="hsv-save-status" class="save-status-msg"></span>
+          </div>
+        </div>
+      </div>
+    </section>
 
   </div><!-- /.dashboard-container -->
 
@@ -1044,6 +1280,138 @@
       // Initial snapshot fetch on DOM load
       document.addEventListener('DOMContentLoaded', loadSnapshot);
     })();
+
+    // --- HSV Color Filter Controller ---
+    let colorDebounceTimer = null;
+
+    function fetchColorConfig() {
+      fetch('/api/color_config')
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data && data.status === 'ok' && data.config) {
+            const cfg = data.config;
+            const l = cfg.lower_hsv || [24, 130, 100];
+            const u = cfg.upper_hsv || [35, 255, 255];
+            document.getElementById('slider-h-min').value = l[0];
+            document.getElementById('slider-s-min').value = l[1];
+            document.getElementById('slider-v-min').value = l[2];
+            document.getElementById('slider-h-max').value = u[0];
+            document.getElementById('slider-s-max').value = u[1];
+            document.getElementById('slider-v-max').value = u[2];
+            document.getElementById('slider-min-area').value = cfg.min_contour_area || 500;
+            document.getElementById('chk-glare-recovery').checked = (cfg.enable_glare_recovery !== false);
+            updateColorReadouts();
+          }
+        })
+        .catch(function(err) { console.warn('Could not fetch color config:', err); });
+    }
+
+    function updateColorReadouts() {
+      document.getElementById('val-h-min').textContent = document.getElementById('slider-h-min').value;
+      document.getElementById('val-s-min').textContent = document.getElementById('slider-s-min').value;
+      document.getElementById('val-v-min').textContent = document.getElementById('slider-v-min').value;
+      document.getElementById('val-h-max').textContent = document.getElementById('slider-h-max').value;
+      document.getElementById('val-s-max').textContent = document.getElementById('slider-s-max').value;
+      document.getElementById('val-v-max').textContent = document.getElementById('slider-v-max').value;
+      document.getElementById('val-min-area').textContent = document.getElementById('slider-min-area').value;
+    }
+
+    function onColorSliderChange() {
+      updateColorReadouts();
+      clearTimeout(colorDebounceTimer);
+      colorDebounceTimer = setTimeout(function() {
+        saveColorConfig(false);
+      }, 150);
+    }
+
+    function applyColorPreset(type) {
+      if (type === 'lemon_yellow') {
+        // Neon / Bright Lemon Yellow: Strips out cardboard completely
+        document.getElementById('slider-h-min').value = 24;
+        document.getElementById('slider-h-max').value = 35;
+        document.getElementById('slider-s-min').value = 140;
+        document.getElementById('slider-s-max').value = 255;
+        document.getElementById('slider-v-min').value = 120;
+        document.getElementById('slider-v-max').value = 255;
+        document.getElementById('slider-min-area').value = 500;
+        document.getElementById('chk-glare-recovery').checked = true;
+      } else if (type === 'standard_yellow') {
+        document.getElementById('slider-h-min').value = 20;
+        document.getElementById('slider-h-max').value = 35;
+        document.getElementById('slider-s-min').value = 100;
+        document.getElementById('slider-s-max').value = 255;
+        document.getElementById('slider-v-min').value = 100;
+        document.getElementById('slider-v-max').value = 255;
+        document.getElementById('slider-min-area').value = 500;
+        document.getElementById('chk-glare-recovery').checked = true;
+      } else if (type === 'green_sim') {
+        document.getElementById('slider-h-min').value = 55;
+        document.getElementById('slider-h-max').value = 85;
+        document.getElementById('slider-s-min').value = 150;
+        document.getElementById('slider-s-max').value = 255;
+        document.getElementById('slider-v-min').value = 100;
+        document.getElementById('slider-v-max').value = 255;
+        document.getElementById('slider-min-area').value = 50;
+        document.getElementById('chk-glare-recovery').checked = false;
+      }
+      onColorSliderChange();
+    }
+
+    function saveColorConfig(isExplicit) {
+      const payload = {
+        lower_hsv: [
+          parseInt(document.getElementById('slider-h-min').value, 10),
+          parseInt(document.getElementById('slider-s-min').value, 10),
+          parseInt(document.getElementById('slider-v-min').value, 10),
+        ],
+        upper_hsv: [
+          parseInt(document.getElementById('slider-h-max').value, 10),
+          parseInt(document.getElementById('slider-s-max').value, 10),
+          parseInt(document.getElementById('slider-v-max').value, 10),
+        ],
+        min_contour_area: parseFloat(document.getElementById('slider-min-area').value),
+        enable_glare_recovery: document.getElementById('chk-glare-recovery').checked,
+      };
+
+      const statusEl = document.getElementById('hsv-save-status');
+      if (isExplicit) {
+        statusEl.textContent = 'Saving...';
+        statusEl.style.color = '#38bdf8';
+      }
+
+      fetch('/api/color_config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data && data.status === 'ok') {
+          if (isExplicit) {
+            statusEl.textContent = '✓ Đã lưu cấu hình màu!';
+            statusEl.style.color = '#10b981';
+            setTimeout(function() { statusEl.textContent = ''; }, 3000);
+          }
+        } else {
+          if (isExplicit) {
+            statusEl.textContent = '❌ Lỗi khi lưu: ' + (data.message || 'Error');
+            statusEl.style.color = '#ef4444';
+          }
+        }
+      })
+      .catch(function(err) {
+        if (isExplicit) {
+          statusEl.textContent = '❌ Lỗi kết nối';
+          statusEl.style.color = '#ef4444';
+        }
+      });
+    }
+
+    window.applyColorPreset = applyColorPreset;
+    window.onColorSliderChange = onColorSliderChange;
+    window.saveColorConfig = saveColorConfig;
+
+    document.addEventListener('DOMContentLoaded', fetchColorConfig);
   </script>
 </body>
 </html>

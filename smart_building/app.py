@@ -249,10 +249,28 @@ def initialize_pipeline_components():
     # Color Detector
     if ColorDetector is not None:
         try:
+            lower = getattr(config, "COLOR_YELLOW_HSV_LOWER", [20, 100, 100])
+            upper = getattr(config, "COLOR_YELLOW_HSV_UPPER", [35, 255, 255])
+            min_area = getattr(config, "COLOR_MIN_CONTOUR_AREA", 500.0)
+            glare_rec = True
+            cfg_path = getattr(config, "COLOR_CONFIG_PATH", "color_config.json")
+            if os.path.exists(cfg_path):
+                try:
+                    with open(cfg_path, "r", encoding="utf-8") as f:
+                        saved = json.load(f)
+                    lower = saved.get("lower_hsv", lower)
+                    upper = saved.get("upper_hsv", upper)
+                    min_area = saved.get("min_contour_area", min_area)
+                    glare_rec = saved.get("enable_glare_recovery", glare_rec)
+                    logger.info("Loaded custom color configuration from %s", cfg_path)
+                except Exception as err:
+                    logger.warning("Failed to load color config from %s: %s", cfg_path, err)
+
             color_detector_instance = ColorDetector(
-                lower_hsv=getattr(config, "COLOR_YELLOW_HSV_LOWER", [20, 100, 100]),
-                upper_hsv=getattr(config, "COLOR_YELLOW_HSV_UPPER", [35, 255, 255]),
-                min_contour_area=getattr(config, "COLOR_MIN_CONTOUR_AREA", 500.0)
+                lower_hsv=lower,
+                upper_hsv=upper,
+                min_contour_area=min_area,
+                enable_glare_recovery=glare_rec,
             )
         except Exception as e:
             logger.warning(f"Failed to initialize ColorDetector: {e}")
@@ -869,6 +887,86 @@ def get_mode():
     with mode_lock:
         mode = current_mode
     return jsonify({"status": "ok", "mode": mode}), 200
+
+
+@app.route('/api/color_config', methods=['GET'])
+def get_color_config():
+    """Returns the active HSV thresholds, min_area, and glare_recovery settings."""
+    if color_detector_instance is not None:
+        return jsonify({"status": "ok", "config": color_detector_instance.get_config()}), 200
+    return jsonify({
+        "status": "ok",
+        "config": {
+            "lower_hsv": getattr(config, "COLOR_YELLOW_HSV_LOWER", [20, 100, 100]),
+            "upper_hsv": getattr(config, "COLOR_YELLOW_HSV_UPPER", [35, 255, 255]),
+            "min_contour_area": float(getattr(config, "COLOR_MIN_CONTOUR_AREA", 500.0)),
+            "enable_glare_recovery": True,
+        }
+    }), 200
+
+
+@app.route('/api/color_config', methods=['POST'])
+def set_color_config():
+    """
+    Updates active HSV color thresholds live and persists them to color_config.json.
+    Accepts JSON:
+    {
+      "lower_hsv": [24, 130, 100],
+      "upper_hsv": [35, 255, 255],
+      "min_contour_area": 500.0,
+      "enable_glare_recovery": true
+    }
+    """
+    try:
+        data = request.get_json(force=True, silent=True)
+        if not data or not isinstance(data, dict):
+            return jsonify({"status": "error", "message": "Invalid JSON payload"}), 400
+
+        lower = data.get("lower_hsv")
+        upper = data.get("upper_hsv")
+        min_area = data.get("min_contour_area")
+        glare_rec = data.get("enable_glare_recovery")
+
+        if lower is not None:
+            if not isinstance(lower, (list, tuple)) or len(lower) != 3 or not all(0 <= int(v) <= 255 for v in lower):
+                return jsonify({"status": "error", "message": "lower_hsv must be a 3-element list [H, S, V]"}), 400
+            lower = [int(v) for v in lower]
+
+        if upper is not None:
+            if not isinstance(upper, (list, tuple)) or len(upper) != 3 or not all(0 <= int(v) <= 255 for v in upper):
+                return jsonify({"status": "error", "message": "upper_hsv must be a 3-element list [H, S, V]"}), 400
+            upper = [int(v) for v in upper]
+
+        if min_area is not None:
+            min_area = max(10.0, float(min_area))
+
+        if glare_rec is not None:
+            glare_rec = bool(glare_rec)
+
+        if color_detector_instance is not None:
+            updated_cfg = color_detector_instance.update_config(
+                lower_hsv=lower,
+                upper_hsv=upper,
+                min_contour_area=min_area,
+                enable_glare_recovery=glare_rec,
+            )
+
+            # Persist to disk
+            cfg_path = getattr(config, "COLOR_CONFIG_PATH", "color_config.json")
+            try:
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    json.dump(updated_cfg, f, indent=2)
+                logger.info("Persisted updated color config to %s", cfg_path)
+            except Exception as e:
+                logger.warning("Failed to write color config to %s: %s", cfg_path, e)
+
+            return jsonify({"status": "ok", "config": updated_cfg}), 200
+
+        return jsonify({"status": "error", "message": "Color detector instance not available"}), 500
+
+    except Exception as e:
+        logger.error("Error setting color config: %s", e)
+        return jsonify({"status": "error", "message": str(e)}), 400
 
 
 # ---------------------------------------------------------------------------

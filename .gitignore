@@ -39,6 +39,8 @@ test_report.json
 # Runtime Artifacts & Dynamic Calibration
 # ==========================================
 *.npy
+color_config.json
+smart_building/color_config.json
 debug_*.jpg
 debug_snapshot.jpg
 *.log

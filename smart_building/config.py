@@ -89,6 +89,9 @@ VALID_CLASS_IDS: list[int] = [0]  # Person only
 COLOR_YELLOW_HSV_LOWER: list[int] = [20, 100, 100]
 COLOR_YELLOW_HSV_UPPER: list[int] = [35, 255, 255]
 COLOR_MIN_CONTOUR_AREA: int = 500
+COLOR_CONFIG_PATH: str = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "color_config.json"
+)
 
 # Default Detection Mode ('color' or 'ai')
 DEFAULT_DETECTION_MODE: str = os.getenv("DEFAULT_DETECTION_MODE", "color")
